@@ -1,9 +1,9 @@
 //! Top header bar rendering note tabs, title editing, and action buttons.
 
 use crate::app::QuickyNotesApp;
-use crate::theme::{self, ACCENT_AMBER, ACCENT_EMERALD};
+use crate::theme;
 use eframe::egui::{
-    self, Color32, FontId, Margin, RichText, Rounding, Sense, Stroke, Ui, ViewportCommand,
+    self, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, ViewportCommand,
 };
 
 /// Renders the top header bar containing open note tabs and header action buttons.
@@ -11,12 +11,12 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
     let palette = theme::get_palette(app.data.settings.theme_mode);
 
     // Solid outer header container bar
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
             palette.bg.r(),
             palette.bg.g(),
             palette.bg.b(),
-            250,
+            245,
         ))
         .stroke(Stroke::new(
             1.0_f32,
@@ -27,7 +27,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                 100,
             ),
         ))
-        .inner_margin(Margin::symmetric(16.0, 10.0))
+        .inner_margin(Margin::symmetric(16, 10))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
@@ -88,11 +88,11 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         ),
                     );
 
-                    let tab_frame = egui::Frame::none()
+                    let tab_frame = egui::Frame::NONE
                         .fill(tab_bg)
                         .stroke(tab_stroke)
-                        .rounding(Rounding::same(8.0))
-                        .inner_margin(Margin::symmetric(14.0, 8.0));
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::symmetric(14, 8));
 
                     tab_frame.show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -102,7 +102,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             if note.pinned {
                                 let pin_btn = ui.add(
                                     egui::Label::new(
-                                        RichText::new("📌").size(12.5).color(ACCENT_AMBER),
+                                        RichText::new("📌").size(12.5).color(theme::ACCENT_AMBER),
                                     )
                                     .sense(Sense::click()),
                                 );
@@ -213,9 +213,9 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
                 // '+' New Tab button
                 let plus_btn = ui.add(
-                    egui::Button::new(RichText::new("+").size(16.0).color(ACCENT_EMERALD))
+                    egui::Button::new(RichText::new("+").size(16.0).color(theme::ACCENT_EMERALD))
                         .fill(Color32::from_rgba_unmultiplied(28, 45, 36, 200))
-                        .rounding(Rounding::same(8.0))
+                        .corner_radius(CornerRadius::same(8))
                         .min_size(egui::vec2(34.0, 32.0)),
                 );
 
@@ -232,7 +232,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             palette.card.b(),
                             200,
                         ))
-                        .rounding(Rounding::same(8.0))
+                        .corner_radius(CornerRadius::same(8))
                         .min_size(egui::vec2(34.0, 32.0)),
                 );
 
@@ -280,7 +280,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         ))
                         .fill(opt_bg)
                         .stroke(Stroke::NONE)
-                        .rounding(Rounding::same(8.0))
+                        .corner_radius(CornerRadius::same(8))
                         .min_size(egui::vec2(34.0, 32.0)),
                     );
 
@@ -322,7 +322,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         ))
                         .fill(search_bg)
                         .stroke(Stroke::NONE)
-                        .rounding(Rounding::same(8.0))
+                        .corner_radius(CornerRadius::same(8))
                         .min_size(egui::vec2(34.0, 32.0)),
                     );
 

@@ -3,7 +3,7 @@
 use crate::app::QuickyNotesApp;
 use crate::settings::WindowSizePreset;
 use crate::theme::{self, ACCENT_AMBER};
-use eframe::egui::{self, Color32, FontId, RichText, Rounding, Stroke, Ui, ViewportCommand};
+use eframe::egui::{self, Color32, CornerRadius, FontId, RichText, Stroke, Ui, ViewportCommand};
 
 /// Renders the spacious, breathable glass Options & Settings drawer.
 pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
@@ -34,7 +34,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                         220,
                     ))
                     .stroke(Stroke::new(1.0_f32, palette.border))
-                    .rounding(Rounding::same(8.0))
+                    .corner_radius(CornerRadius::same(8))
                     .min_size(egui::vec2(80.0, 32.0)),
                 );
                 if close_btn.clicked() {
@@ -117,7 +117,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                                         )
                                         .fill(fill)
                                         .stroke(stroke)
-                                        .rounding(Rounding::same(8.0))
+                                        .corner_radius(CornerRadius::same(8))
                                         .min_size(egui::vec2(0.0, 32.0)),
                                     );
 
@@ -259,7 +259,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                                         )
                                         .fill(btn_bg)
                                         .stroke(stroke)
-                                        .rounding(Rounding::same(8.0))
+                                        .corner_radius(CornerRadius::same(8))
                                         .min_size(egui::vec2(0.0, 30.0)),
                                     );
 
@@ -497,7 +497,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                                     210,
                                 ))
                                 .stroke(Stroke::new(1.0_f32, palette.border))
-                                .rounding(Rounding::same(8.0))
+                                .corner_radius(CornerRadius::same(8))
                                 .min_size(egui::vec2(ui.available_width(), 34.0)),
                             );
 
@@ -572,7 +572,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                         245,
                     ))
                     .stroke(Stroke::new(1.2_f32, palette.accent))
-                    .rounding(Rounding::same(8.0))
+                    .corner_radius(CornerRadius::same(8))
                     .min_size(egui::vec2(ui.available_width(), 38.0)),
                 );
 

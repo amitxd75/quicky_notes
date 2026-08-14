@@ -2,7 +2,7 @@
 
 use crate::app::QuickyNotesApp;
 use crate::theme;
-use eframe::egui::{self, Color32, FontId, Margin, RichText, Rounding, Stroke, Ui};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, RichText, Stroke, Ui};
 
 /// Renders the inline glass Search & Browse notes drawer.
 pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
@@ -33,7 +33,7 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                         220,
                     ))
                     .stroke(Stroke::new(1.0_f32, palette.border))
-                    .rounding(Rounding::same(8.0))
+                    .corner_radius(CornerRadius::same(8))
                     .min_size(egui::vec2(72.0, 28.0)),
                 );
                 if close_btn.clicked() {
@@ -47,7 +47,7 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
         ui.add_space(6.0);
 
         // Search input field
-        let search_frame = egui::Frame::none()
+        let search_frame = egui::Frame::NONE
             .fill(Color32::from_rgba_unmultiplied(
                 palette.bg.r(),
                 palette.bg.g(),
@@ -55,8 +55,8 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                 220,
             ))
             .stroke(Stroke::new(1.2_f32, palette.border))
-            .rounding(Rounding::same(8.0))
-            .inner_margin(Margin::symmetric(10.0, 6.0));
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(Margin::symmetric(10, 6));
 
         search_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -68,7 +68,7 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                 let search_edit = egui::TextEdit::singleline(&mut app.search_query)
                     .hint_text("Type to search notes...")
                     .text_color(Color32::WHITE)
-                    .frame(false)
+                    .frame(egui::Frame::NONE)
                     .desired_width(ui.available_width());
 
                 let resp = ui.add(search_edit);
@@ -178,7 +178,7 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                             )
                             .fill(btn_bg)
                             .stroke(stroke)
-                            .rounding(Rounding::same(6.0))
+                            .corner_radius(CornerRadius::same(6))
                             .min_size(egui::vec2(ui.available_width(), 30.0)),
                         );
 

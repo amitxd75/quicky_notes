@@ -6,16 +6,14 @@ I built this because I wanted a lightweight popup note widget that matches my de
 
 ![Quicky Notes](./assets/screenshot-main.png)
 
-## Features
+## Highlights
 
-- Dynamic wallpaper color auto-sync (Pywal and Caelestia)
-- 8 built-in color themes (Violet, Emerald, Frost, Pink, OLED, etc.)
-- Drag and drop text files or text snippets from Dolphin / file managers
-- System font selector (FiraCode, JetBrains Mono, Inter, etc.)
-- Tab pinning and renaming
-- Hyprland window resize presets (saves window size on exit)
-- Full-text note search (Ctrl+K)
-- Unsaved tab close confirmation dialog
+- **Real-Time Wallpaper Color Sync**: Auto-detects Pywal & Caelestia scheme updates and adapts palette accents dynamically.
+- **Dolphin Drag & Drop Payload Parser**: Accepts raw byte payloads, percent-encoded URIs, and code snippets dropped from KDE Dolphin / GTK file managers.
+- **Thread-Safe System Font Discovery**: Queries `fontconfig` and `fc-list` asynchronously on startup with zero UI main-thread blocking.
+- **Chunked 100k+ Line Rendering**: Bypasses GPU mesh vertex clipping to handle giant files smoothly without ANR or frame freezes.
+- **Wayland Window Geometry Memory**: Saves window dimensions and restore presets cleanly across desktop sessions.
+- **Modal Close Confirmation**: Modal overlay intercepting tab close actions on unsaved files.
 
 ![Settings](./assets/screenshot-settings.png)
 

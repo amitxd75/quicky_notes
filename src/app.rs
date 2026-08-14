@@ -5,7 +5,7 @@ use crate::storage::AppData;
 use crate::theme::{self, ACCENT_EMERALD, ACCENT_PURPLE};
 use crate::ui;
 use eframe::egui::{
-    self, Color32, FontId, Margin, RichText, Rounding, Stroke, Ui, ViewportCommand,
+    self, Color32, CornerRadius, FontId, Margin, RichText, Stroke, Ui, ViewportCommand,
 };
 use std::time::{Duration, Instant};
 
@@ -421,8 +421,8 @@ impl QuickyNotesApp {
                     let mut content_changed = false;
                     let should_focus = self.focus_editor;
 
-                    egui::Frame::none()
-                        .inner_margin(Margin::symmetric(14.0, 10.0))
+                    egui::Frame::NONE
+                        .inner_margin(Margin::symmetric(14, 10))
                         .show(ui, |ui| {
                             if self.show_options {
                                 ui::options_drawer::render_options_drawer(self, ctx, ui);
@@ -501,7 +501,7 @@ impl QuickyNotesApp {
                                                     .font(font)
                                                     .desired_width(f32::INFINITY)
                                                     .lock_focus(true)
-                                                    .frame(false);
+                                                    .frame(egui::Frame::NONE);
 
                                             let response = ui.add(text_edit);
                                             if should_focus {
@@ -535,8 +535,8 @@ impl QuickyNotesApp {
                     ui::draw_horizontal_divider(ui);
 
                     // 3. Status Bar at bottom of Editor Box
-                    egui::Frame::none()
-                        .inner_margin(Margin::symmetric(14.0, 6.0))
+                    egui::Frame::NONE
+                        .inner_margin(Margin::symmetric(14, 6))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 // Left: Green status dot ● Saved
@@ -651,7 +651,9 @@ impl QuickyNotesApp {
         let mut files_to_open: Vec<(String, String)> = Vec::new();
 
         for file in dropped {
-            if let Some(path) = &file.path
+            let path = file.path();
+            if path.exists()
+                && path.is_file()
                 && let Ok(content) = std::fs::read_to_string(path)
             {
                 let name = path
@@ -662,8 +664,8 @@ impl QuickyNotesApp {
                 continue;
             }
 
-            if let Some(bytes) = &file.bytes {
-                self.process_dropped_bytes(bytes, &mut files_to_open);
+            if let Ok(bytes) = file.bytes() {
+                self.process_dropped_bytes(&bytes, &mut files_to_open);
             }
         }
 
@@ -755,8 +757,9 @@ fn url_decode(s: &str) -> String {
     result
 }
 
-impl eframe::App for QuickyNotesApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl QuickyNotesApp {
+    /// Internal frame update method.
+    fn update_app(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         self.handle_dropped_files(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
@@ -787,11 +790,7 @@ impl eframe::App for QuickyNotesApp {
         }
 
         // Clean main window panel with integrated drawers
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().inner_margin(Margin::same(2.0)))
-            .show(ctx, |ui| {
-                self.render_main_editor(ctx, ui);
-            });
+        self.render_main_editor(ctx, ui);
 
         // Render Close Tab Confirmation Modal as a robust foreground overlay
         if let Some(close_id) = self.confirm_close_id.clone() {
@@ -815,12 +814,12 @@ impl eframe::App for QuickyNotesApp {
                 .order(egui::Order::Foreground)
                 .fixed_pos(egui::Pos2::ZERO)
                 .show(ctx, |ui| {
-                    let screen_rect = ctx.screen_rect();
+                    let screen_rect = ui.clip_rect();
 
                     // Dimmed backdrop mask
                     ui.painter().rect_filled(
                         screen_rect,
-                        Rounding::ZERO,
+                        CornerRadius::ZERO,
                         Color32::from_black_alpha(170),
                     );
 
@@ -871,7 +870,7 @@ impl eframe::App for QuickyNotesApp {
                                         220,
                                     ))
                                     .stroke(Stroke::new(1.0_f32, Color32::from_gray(120)))
-                                    .rounding(Rounding::same(8.0))
+                                    .corner_radius(CornerRadius::same(8))
                                     .min_size(egui::vec2(100.0, 32.0)),
                                 );
 
@@ -891,7 +890,7 @@ impl eframe::App for QuickyNotesApp {
                                     )
                                     .fill(Color32::from_rgba_unmultiplied(180, 45, 60, 240))
                                     .stroke(Stroke::new(1.0_f32, Color32::from_rgb(239, 68, 68)))
-                                    .rounding(Rounding::same(8.0))
+                                    .corner_radius(CornerRadius::same(8))
                                     .min_size(egui::vec2(110.0, 32.0)),
                                 );
 
@@ -914,17 +913,18 @@ impl eframe::App for QuickyNotesApp {
                 .order(egui::Order::Foreground)
                 .fixed_pos(egui::Pos2::ZERO)
                 .show(ctx, |ui| {
-                    let rect = ctx.screen_rect();
+                    let rect = ui.clip_rect();
                     ui.allocate_rect(rect, egui::Sense::hover());
                     ui.painter().rect_filled(
                         rect,
-                        Rounding::same(12.0),
+                        CornerRadius::same(12),
                         Color32::from_rgba_unmultiplied(18, 12, 28, 220),
                     );
                     ui.painter().rect_stroke(
                         rect.shrink(8.0),
-                        Rounding::same(10.0),
+                        CornerRadius::same(10),
                         Stroke::new(2.0_f32, ACCENT_PURPLE),
+                        egui::StrokeKind::Outside,
                     );
                     ui.painter().text(
                         rect.center(),
@@ -936,8 +936,15 @@ impl eframe::App for QuickyNotesApp {
                 });
         }
     }
+}
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+impl eframe::App for QuickyNotesApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.update_app(&ctx, ui);
+    }
+
+    fn on_exit(&mut self) {
         if self.is_dirty {
             let _ = self.data.save();
         }

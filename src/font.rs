@@ -85,7 +85,7 @@ pub fn apply_system_font(ctx: &egui::Context, font_name: &str) {
 
             font_defs
                 .font_data
-                .insert(font_key.clone(), FontData::from_owned(bytes));
+                .insert(font_key.clone(), FontData::from_owned(bytes).into());
 
             font_defs
                 .families

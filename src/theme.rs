@@ -1,7 +1,5 @@
-//! Theme manager, palette definitions, and wallpaper color auto-sync engine.
-
 use eframe::egui::{
-    Color32, Context, FontData, FontDefinitions, FontFamily, Frame, Margin, Rounding, Stroke,
+    Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, Frame, Margin, Stroke,
     Style, Visuals,
 };
 use serde::{Deserialize, Serialize};
@@ -239,7 +237,7 @@ fn setup_custom_fonts(ctx: &Context) {
         if let Ok(bytes) = fs::read(path) {
             fonts
                 .font_data
-                .insert("nerd_font".to_owned(), FontData::from_owned(bytes));
+                .insert("nerd_font".to_owned(), FontData::from_owned(bytes).into());
             fonts
                 .families
                 .entry(FontFamily::Proportional)
@@ -284,13 +282,13 @@ pub fn setup_glassmorphism_theme(ctx: &Context, opacity: f32, mode: ThemeMode) {
     visuals.widgets.noninteractive.bg_fill =
         Color32::from_rgba_unmultiplied(palette.card.r(), palette.card.g(), palette.card.b(), 200);
     visuals.widgets.noninteractive.bg_stroke = Stroke::NONE;
-    visuals.widgets.noninteractive.rounding = Rounding::same(8.0);
+    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(8);
 
     visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_gray(230));
     visuals.widgets.inactive.bg_fill =
         Color32::from_rgba_unmultiplied(palette.card.r(), palette.card.g(), palette.card.b(), 220);
     visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-    visuals.widgets.inactive.rounding = Rounding::same(8.0);
+    visuals.widgets.inactive.corner_radius = CornerRadius::same(8);
 
     visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
     visuals.widgets.hovered.bg_fill = Color32::from_rgba_unmultiplied(
@@ -300,28 +298,28 @@ pub fn setup_glassmorphism_theme(ctx: &Context, opacity: f32, mode: ThemeMode) {
         200,
     );
     visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-    visuals.widgets.hovered.rounding = Rounding::same(8.0);
+    visuals.widgets.hovered.corner_radius = CornerRadius::same(8);
 
     visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
     visuals.widgets.active.bg_fill = palette.accent;
     visuals.widgets.active.bg_stroke = Stroke::NONE;
-    visuals.widgets.active.rounding = Rounding::same(8.0);
+    visuals.widgets.active.corner_radius = CornerRadius::same(8);
 
-    visuals.window_rounding = Rounding::same(12.0);
+    visuals.window_corner_radius = CornerRadius::same(12);
 
     let style = Style {
         visuals,
         ..Style::default()
     };
 
-    ctx.set_style(style);
+    ctx.set_style_of(egui::Theme::Dark, style);
 }
 
 /// Creates a glass editor frame with translucent background and accent border.
 pub fn glass_editor_frame(opacity: f32, mode: ThemeMode) -> Frame {
     let palette = get_palette(mode);
     let alpha = (opacity * 255.0).clamp(140.0, 235.0) as u8;
-    Frame::none()
+    Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
             palette.bg.r(),
             palette.bg.g(),
@@ -329,15 +327,15 @@ pub fn glass_editor_frame(opacity: f32, mode: ThemeMode) -> Frame {
             alpha,
         ))
         .stroke(Stroke::new(1.2_f32, palette.border))
-        .rounding(Rounding::same(14.0))
-        .inner_margin(Margin::same(0.0))
+        .corner_radius(CornerRadius::same(14))
+        .inner_margin(Margin::same(0))
 }
 
 /// Creates a glass card frame for settings cards.
 pub fn glass_card_frame(opacity: f32, mode: ThemeMode) -> Frame {
     let palette = get_palette(mode);
     let alpha = (opacity * 255.0).clamp(160.0, 240.0) as u8;
-    Frame::none()
+    Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
             palette.card.r(),
             palette.card.g(),
@@ -345,6 +343,6 @@ pub fn glass_card_frame(opacity: f32, mode: ThemeMode) -> Frame {
             alpha,
         ))
         .stroke(Stroke::new(1.0_f32, palette.border))
-        .rounding(Rounding::same(14.0))
-        .inner_margin(Margin::same(12.0))
+        .corner_radius(CornerRadius::same(14))
+        .inner_margin(Margin::same(12))
 }
