@@ -370,7 +370,7 @@ mod tests {
 
         let loaded = AppData::load_from_path(&path);
         assert_eq!(loaded.notes.len(), initial.notes.len());
-        assert_eq!(loaded.notes[0].content, "Hello world!");
+        assert_eq!(loaded.notes[0].content, initial.notes[0].content);
         assert_eq!(loaded.settings.font_size, 20.0);
         assert_eq!(loaded.active_note_id, Some("note-1".to_string()));
 
