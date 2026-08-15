@@ -4,6 +4,8 @@
 //! and Hyprland Wayland viewport configuration.
 
 mod app;
+mod components;
+mod crash;
 mod font;
 mod note;
 mod settings;
@@ -17,6 +19,8 @@ use eframe::egui;
 /// Main application entry point.
 /// Loads saved settings/notes from disk and starts the `eframe` event loop.
 fn main() -> Result<(), eframe::Error> {
+    crash::install_crash_handler();
+
     let data = storage::AppData::load();
     let width = data.settings.window_width;
     let height = data.settings.window_height;

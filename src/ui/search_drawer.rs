@@ -1,12 +1,21 @@
-//! Search & Browse notes drawer component.
+//! Search & Browse notes drawer component with real-time filtering.
 
 use crate::app::QuickyNotesApp;
+use crate::components::{button, card, input};
 use crate::theme;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, RichText, Stroke, Ui};
+use eframe::egui::{self, Color32, CornerRadius, FontId, RichText, Stroke, Ui};
+
+/// Returns true if note matches search query (case-insensitive title/content substring).
+pub fn note_matches_query(title: &str, content: &str, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    title.to_lowercase().contains(query) || content.to_lowercase().contains(query)
+}
 
 /// Renders the inline glass Search & Browse notes drawer.
 pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
-    let palette = theme::get_palette(app.data.settings.theme_mode);
+    let palette = theme::get_palette(&app.data.settings);
 
     ui.vertical(|ui| {
         ui.add_space(4.0);
@@ -20,22 +29,7 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                     .color(Color32::WHITE),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close_btn = ui.add(
-                    egui::Button::new(
-                        RichText::new("Close  ✕")
-                            .font(FontId::proportional(12.5))
-                            .color(Color32::WHITE),
-                    )
-                    .fill(Color32::from_rgba_unmultiplied(
-                        palette.card.r(),
-                        palette.card.g(),
-                        palette.card.b(),
-                        220,
-                    ))
-                    .stroke(Stroke::new(1.0_f32, palette.border))
-                    .corner_radius(CornerRadius::same(8))
-                    .min_size(egui::vec2(72.0, 28.0)),
-                );
+                let close_btn = button::close_button(ui, &palette);
                 if close_btn.clicked() {
                     app.show_search = false;
                     app.focus_editor = true;
@@ -47,33 +41,12 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
         ui.add_space(6.0);
 
         // Search input field
-        let search_frame = egui::Frame::NONE
-            .fill(Color32::from_rgba_unmultiplied(
-                palette.bg.r(),
-                palette.bg.g(),
-                palette.bg.b(),
-                220,
-            ))
-            .stroke(Stroke::new(1.2_f32, palette.border))
-            .corner_radius(CornerRadius::same(8))
-            .inner_margin(Margin::symmetric(10, 6));
-
-        search_frame.show(ui, |ui| {
+        card::glass_input_frame(&app.data.settings).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("🔍")
-                        .size(12.0)
-                        .color(Color32::from_gray(160)),
-                );
-                let search_edit = egui::TextEdit::singleline(&mut app.search_query)
-                    .hint_text("Type to search notes...")
-                    .text_color(Color32::WHITE)
-                    .frame(egui::Frame::NONE)
-                    .desired_width(ui.available_width());
-
-                let resp = ui.add(search_edit);
-                if app.focus_search {
-                    resp.request_focus();
+                input::search_bar_icon(ui);
+                let focus = app.focus_search;
+                input::search_input(ui, &mut app.search_query, "Type to search notes...", focus);
+                if focus {
                     app.focus_search = false;
                 }
             });
@@ -88,66 +61,47 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                 ui.spacing_mut().item_spacing.y = 6.0;
 
                 let query = app.search_query.trim().to_lowercase();
-                let active_id = app.data.active_note_id.clone();
+                let active_id = app.data.active_note_id.as_deref();
                 let mut note_to_select = None;
 
-                let filtered_notes: Vec<_> = app
+                let matching_notes: Vec<_> = app
                     .data
                     .notes
                     .iter()
-                    .filter(|n| {
-                        query.is_empty()
-                            || n.title.to_lowercase().contains(&query)
-                            || n.content.to_lowercase().contains(&query)
-                    })
+                    .filter(|n| note_matches_query(&n.title, &n.content, &query))
                     .collect();
 
-                let filtered_count = filtered_notes.len();
+                let filtered_count = matching_notes.len();
                 if filtered_count > 0 && app.search_selected_idx >= filtered_count {
                     app.search_selected_idx = 0;
                 }
 
-                if filtered_notes.is_empty() {
+                if matching_notes.is_empty() {
                     ui.label(
                         RichText::new("No matching notes found")
                             .size(12.0)
                             .color(Color32::from_gray(160)),
                     );
                 } else {
-                    for (idx, note) in filtered_notes.iter().enumerate() {
+                    for (idx, note) in matching_notes.iter().enumerate() {
                         let is_highlighted = idx == app.search_selected_idx;
-                        let is_active = active_id.as_deref() == Some(&note.id);
+                        let is_active = active_id == Some(note.id.as_str());
 
                         let (btn_bg, stroke, text_color) = if is_highlighted {
                             (
-                                Color32::from_rgba_unmultiplied(
-                                    (palette.card.r() as u16 + 40).min(255) as u8,
-                                    (palette.card.g() as u16 + 35).min(255) as u8,
-                                    (palette.card.b() as u16 + 45).min(255) as u8,
-                                    240,
-                                ),
+                                theme::Palette::lighten(palette.card, 40, 240),
                                 Stroke::new(1.2_f32, palette.accent),
                                 Color32::WHITE,
                             )
                         } else if is_active {
                             (
-                                Color32::from_rgba_unmultiplied(
-                                    palette.card.r(),
-                                    palette.card.g(),
-                                    palette.card.b(),
-                                    210,
-                                ),
+                                theme::Palette::with_alpha(palette.card, 210),
                                 Stroke::NONE,
                                 Color32::WHITE,
                             )
                         } else {
                             (
-                                Color32::from_rgba_unmultiplied(
-                                    palette.bg.r(),
-                                    palette.bg.g(),
-                                    palette.bg.b(),
-                                    140,
-                                ),
+                                theme::Palette::with_alpha(palette.bg, 140),
                                 Stroke::NONE,
                                 Color32::from_gray(200),
                             )
@@ -197,4 +151,17 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                 }
             });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_note_matches_query() {
+        assert!(note_matches_query("shopping.txt", "Milk, Eggs", ""));
+        assert!(note_matches_query("shopping.txt", "Milk, Eggs", "shop"));
+        assert!(note_matches_query("shopping.txt", "Milk, Eggs", "eggs"));
+        assert!(!note_matches_query("shopping.txt", "Milk, Eggs", "bread"));
+    }
 }

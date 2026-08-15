@@ -9,11 +9,14 @@ I built this because I wanted a lightweight popup note widget that matches my de
 ## Features
 
 - Auto-syncs with Pywal & Caelestia wallpaper colors
-- Drag and drop text files or snippets directly from Dolphin
-- Custom system fonts (FiraCode, JetBrains Mono, Inter)
-- Tab pinning, renaming, and search (Ctrl+K)
-- Remembers window sizes & position
-- Confirmation popup before closing unsaved tabs
+- Direct external file editing & disk syncing (edits update files at their source location)
+- Drag and drop text files or snippets directly from Dolphin / file managers
+- Live Markdown split preview and rendered view (Ctrl+P)
+- Custom system fonts and code monospace mode
+- Tab pinning, double-click renaming, and search (Ctrl+K)
+- Real-time glassmorphism styling (opacity, corner rounding, custom theme colors)
+- Safe atomic disk writes, crash logs, and corrupt config recovery
+- Interactive bottom status bar with linked file paths and word/char count
 
 ![Settings](./assets/screenshot-settings.png)
 
@@ -27,11 +30,14 @@ I built this because I wanted a lightweight popup note widget that matches my de
 
 - Super + N : Toggle window
 - Ctrl + N : New tab
-- Ctrl + W : Close tab
-- Ctrl + S : Save
+- Ctrl + W : Close active tab
+- Ctrl + S : Save all notes / sync linked files to disk
 - Ctrl + K : Search notes
-- Ctrl + , : Open settings
-- Ctrl + 1..9 : Switch tabs
+- Ctrl + , : Open settings & preferences
+- Ctrl + P : Toggle Markdown preview mode (Edit / Split / Preview)
+- Ctrl + Shift + E : Export active note
+- Ctrl + 1..9 / 0 : Switch to tab index
+- Ctrl + Tab / Ctrl + Shift + Tab : Next / Previous tab
 - Ctrl + + / - : Adjust font size
 
 ## Building

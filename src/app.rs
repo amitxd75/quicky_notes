@@ -1,13 +1,83 @@
-//! Core Quicky Notes application controller and event handler.
+//! Core Quicky Notes application controller and event loop coordination.
 
 use crate::note::Note;
 use crate::storage::AppData;
-use crate::theme::{self, ACCENT_EMERALD, ACCENT_PURPLE};
+use crate::theme;
 use crate::ui;
-use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Margin, RichText, Stroke, Ui, ViewportCommand,
-};
+use eframe::egui::{self, Color32, Ui, ViewportCommand};
 use std::time::{Duration, Instant};
+
+/// Markdown preview mode for note editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkdownViewMode {
+    #[default]
+    Edit,
+    Split,
+    Preview,
+}
+
+impl MarkdownViewMode {
+    /// Returns the next view mode in the cycle: Edit -> Split -> Preview -> Edit.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Edit => Self::Split,
+            Self::Split => Self::Preview,
+            Self::Preview => Self::Edit,
+        }
+    }
+
+    /// Display icon for mode switcher.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::Edit => "📝",
+            Self::Split => "◫",
+            Self::Preview => "👁",
+        }
+    }
+
+    /// Tooltip label for mode switcher.
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Edit => "Edit Mode (Ctrl+P)",
+            Self::Split => "Split Mode (Ctrl+P)",
+            Self::Preview => "Preview Mode (Ctrl+P)",
+        }
+    }
+}
+
+/// Navigation tabs in the Settings & Preferences drawer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    Appearance,
+    Editor,
+    FilesBackup,
+    Shortcuts,
+    About,
+}
+
+impl SettingsTab {
+    pub const ALL: [Self; 6] = [
+        Self::General,
+        Self::Appearance,
+        Self::Editor,
+        Self::FilesBackup,
+        Self::Shortcuts,
+        Self::About,
+    ];
+
+    pub fn icon_and_label(self) -> (&'static str, &'static str) {
+        match self {
+            Self::General => ("⚙", "General"),
+            Self::Appearance => ("🎨", "Appearance"),
+            Self::Editor => ("📝", "Editor"),
+            Self::FilesBackup => ("📁", "Files & Backup"),
+            Self::Shortcuts => ("⌨", "Shortcuts"),
+            Self::About => ("ℹ", "About"),
+        }
+    }
+}
 
 /// Main application state for Quicky Notes.
 pub struct QuickyNotesApp {
@@ -23,9 +93,6 @@ pub struct QuickyNotesApp {
     /// ID of note title currently undergoing inline rename.
     pub editing_title_id: Option<String>,
 
-    /// Temporary title buffer during inline rename.
-    pub temp_title_input: String,
-
     /// Whether the Options & Settings drawer is open.
     pub show_options: bool,
 
@@ -37,6 +104,12 @@ pub struct QuickyNotesApp {
 
     /// Trigger flag to request focus on the main text editor.
     pub focus_editor: bool,
+
+    /// Markdown preview mode (Edit, Split, or Preview).
+    pub preview_mode: MarkdownViewMode,
+
+    /// Active tab in Settings & Preferences drawer.
+    pub settings_tab: SettingsTab,
 
     /// Status bar notification text and creation timestamp.
     pub status_msg: Option<(String, Instant)>,
@@ -50,28 +123,21 @@ pub struct QuickyNotesApp {
     /// Cached wallpaper colors for change detection.
     pub last_wallpaper_colors: Option<(Color32, Color32, Color32)>,
 
-    /// ID of note tab pending close confirmation.
+    /// ID of note tab waiting for close confirmation in modal dialog.
     pub confirm_close_id: Option<String>,
+
+    /// Shutdown flag to prevent drawing during Wayland surface teardown.
+    pub is_closing: bool,
 
     /// Whether unsaved modifications exist.
     pub is_dirty: bool,
 }
 
 impl QuickyNotesApp {
-    /// Legacy constructor.
-    #[allow(dead_code)]
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let data = AppData::load();
-        Self::new_with_data(cc, data)
-    }
-
     /// Primary constructor using pre-loaded AppData.
     pub fn new_with_data(cc: &eframe::CreationContext<'_>, data: AppData) -> Self {
-        theme::setup_glassmorphism_theme(
-            &cc.egui_ctx,
-            data.settings.opacity,
-            data.settings.theme_mode,
-        );
+        crate::font::setup_default_fonts(&cc.egui_ctx);
+        theme::setup_glassmorphism_theme(&cc.egui_ctx, &data.settings);
         crate::font::apply_system_font(&cc.egui_ctx, &data.settings.selected_font);
         let initial_colors = theme::get_wallpaper_colors();
 
@@ -80,41 +146,24 @@ impl QuickyNotesApp {
                 .send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
         }
 
-        // Restore saved window dimensions on startup for Hyprland Lua
-        let w = data.settings.window_width as u32;
-        let h = data.settings.window_height as u32;
-        let _ = std::process::Command::new("hyprctl")
-            .arg("dispatch")
-            .arg(format!("hl.dsp.window.resize({{ x = {}, y = {} }})", w, h))
-            .spawn();
-
         Self {
             data,
             search_query: String::new(),
             search_selected_idx: 0,
             editing_title_id: None,
-            temp_title_input: String::new(),
             show_options: false,
             show_search: false,
             focus_search: false,
             focus_editor: true,
+            preview_mode: MarkdownViewMode::Edit,
+            settings_tab: SettingsTab::General,
             status_msg: Some(("Quicky Notes ready".to_string(), Instant::now())),
             last_auto_save: Instant::now(),
             last_wallpaper_check: Instant::now(),
             last_wallpaper_colors: initial_colors,
             confirm_close_id: None,
+            is_closing: false,
             is_dirty: false,
-        }
-    }
-
-    /// Prompts close confirmation modal if note has content, or closes immediately if empty.
-    pub fn prompt_close_note(&mut self, id: &str) {
-        if let Some(note) = self.data.notes.iter().find(|n| n.id == id) {
-            if note.content.trim().is_empty() {
-                self.close_note(id);
-            } else {
-                self.confirm_close_id = Some(id.to_string());
-            }
         }
     }
 
@@ -123,23 +172,22 @@ impl QuickyNotesApp {
         self.status_msg = Some((text.into(), Instant::now()));
     }
 
-    /// Returns mutable reference to active note.
-    pub fn active_note_mut(&mut self) -> Option<&mut Note> {
-        let active_id = self.data.active_note_id.clone()?;
-        self.data.notes.iter_mut().find(|n| n.id == active_id)
-    }
-
     /// Returns immutable reference to active note.
     pub fn active_note(&self) -> Option<&Note> {
-        let active_id = self.data.active_note_id.as_ref()?;
-        self.data.notes.iter().find(|n| n.id == *active_id)
+        let active_id = self.data.active_note_id.as_deref()?;
+        self.data.notes.iter().find(|n| n.id == active_id)
     }
 
-    /// Creates a new note tab.
+    /// Creates a new note tab and selects it.
     pub fn create_new_note(&mut self) {
         let count = self.data.notes.len() + 1;
         let id = format!("note-{}", chrono::Local::now().timestamp_millis());
-        let title = format!("note_{}.txt", count);
+        let ext = if self.data.settings.default_extension.starts_with('.') {
+            &self.data.settings.default_extension
+        } else {
+            ".txt"
+        };
+        let title = format!("note_{}{}", count, ext);
         let note = Note::new(id.clone(), title);
         self.data.notes.push(note);
         self.data.active_note_id = Some(id);
@@ -148,11 +196,23 @@ impl QuickyNotesApp {
         self.set_status("New tab created");
     }
 
-    /// Closes note tab by ID.
+    /// Prompts close confirmation modal if note has content, or closes immediately if empty or disabled.
+    pub fn prompt_close_note(&mut self, id: &str) {
+        if let Some(note) = self.data.notes.iter().find(|n| n.id == id) {
+            if !self.data.settings.confirm_close_tab || note.content.trim().is_empty() {
+                self.close_note(id);
+            } else {
+                self.confirm_close_id = Some(id.to_string());
+            }
+        }
+    }
+
+    /// Closes note tab by ID, resetting to untitled if it was the last open tab.
     pub fn close_note(&mut self, id: &str) {
         if self.data.notes.len() <= 1 {
             if let Some(note) = self.data.notes.first_mut() {
-                note.title = "untitled.txt".to_string();
+                let ext = &self.data.settings.default_extension;
+                note.title = format!("untitled{}", ext);
                 note.content.clear();
                 note.update_timestamp();
             }
@@ -172,601 +232,78 @@ impl QuickyNotesApp {
         }
     }
 
-    /// Exports active note to ~/Documents or current working directory.
-    pub fn export_active_note(&mut self) {
-        if let Some(note) = self.active_note() {
-            let filename = if note.title.trim().is_empty() {
-                "quicky_note.txt".to_string()
-            } else if note.title.ends_with(".txt") || note.title.ends_with(".md") {
-                note.title.clone()
-            } else {
-                format!("{}.txt", note.title)
-            };
-
-            let path = directories::UserDirs::new()
-                .and_then(|u| u.document_dir().map(|d| d.join(&filename)))
-                .unwrap_or_else(|| std::path::PathBuf::from(&filename));
-
-            if std::fs::write(&path, &note.content).is_ok() {
-                self.set_status(format!("Exported to {}", filename));
-            } else {
-                self.set_status("Export failed");
-            }
-        }
-    }
-
-    /// Evaluates global keyboard shortcuts.
-    fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
-        let ctrl_shift_tab = ctx.input_mut(|i| {
-            i.consume_key(
-                egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
-                egui::Key::Tab,
-            )
-        });
-        let ctrl_tab = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));
-
-        if (ctrl_tab || ctrl_shift_tab) && !self.data.notes.is_empty() {
-            let current_idx = self
-                .data
-                .notes
-                .iter()
-                .position(|n| Some(&n.id) == self.data.active_note_id.as_ref())
-                .unwrap_or(0);
-
-            let next_idx = if ctrl_shift_tab {
-                if current_idx == 0 {
-                    self.data.notes.len() - 1
-                } else {
-                    current_idx - 1
-                }
-            } else {
-                (current_idx + 1) % self.data.notes.len()
-            };
-
-            self.data.active_note_id = Some(self.data.notes[next_idx].id.clone());
-            self.focus_editor = true;
-        }
-
-        ctx.input(|i| {
-            // Ctrl + N: New note tab
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::N) {
-                self.create_new_note();
-            }
-
-            // Ctrl + W: Close active note tab
-            if i.modifiers.ctrl
-                && i.key_pressed(egui::Key::W)
-                && let Some(id) = self.data.active_note_id.clone()
-            {
-                self.prompt_close_note(&id);
-            }
-
-            // Ctrl + S: Save to disk
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::S) && self.data.save().is_ok() {
-                self.is_dirty = false;
-                self.set_status("Saved to disk ✓");
-            }
-
-            // Ctrl + K: Search notes modal
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::K) {
-                self.show_search = !self.show_search;
-                self.show_options = false;
-                if self.show_search {
-                    self.focus_search = true;
-                } else {
-                    self.focus_editor = true;
-                }
-            }
-
-            // Ctrl + ,: Options modal
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::Comma) {
-                self.show_options = !self.show_options;
-                self.show_search = false;
-                if !self.show_options {
-                    self.focus_editor = true;
-                }
-            }
-
-            // Ctrl + Shift + E: Export note
-            if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::E) {
-                self.export_active_note();
-            }
-
-            // Ctrl + Shift + T: Toggle Always on Top
-            if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::T) {
-                self.data.settings.always_on_top = !self.data.settings.always_on_top;
-                let level = if self.data.settings.always_on_top {
-                    egui::WindowLevel::AlwaysOnTop
-                } else {
-                    egui::WindowLevel::Normal
-                };
-                ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
-                self.is_dirty = true;
-            }
-
-            // Ctrl + + / Ctrl + =: Increase font size
-            if i.modifiers.ctrl
-                && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus))
-            {
-                self.data.settings.font_size = (self.data.settings.font_size + 1.0).min(32.0);
-                self.is_dirty = true;
-                let _ = self.data.save();
-                self.set_status(format!("Font size: {:.0}pt", self.data.settings.font_size));
-            }
-
-            // Ctrl + -: Decrease font size
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::Minus) {
-                self.data.settings.font_size = (self.data.settings.font_size - 1.0).max(8.0);
-                self.is_dirty = true;
-                let _ = self.data.save();
-                self.set_status(format!("Font size: {:.0}pt", self.data.settings.font_size));
-            }
-
-            // Ctrl + 1..=9 / Ctrl + 0: Switch to tab by index
-            if i.modifiers.ctrl {
-                let num_keys = [
-                    (egui::Key::Num1, 0),
-                    (egui::Key::Num2, 1),
-                    (egui::Key::Num3, 2),
-                    (egui::Key::Num4, 3),
-                    (egui::Key::Num5, 4),
-                    (egui::Key::Num6, 5),
-                    (egui::Key::Num7, 6),
-                    (egui::Key::Num8, 7),
-                    (egui::Key::Num9, 8),
-                ];
-                for (key, idx) in num_keys {
-                    if i.key_pressed(key)
-                        && let Some(note) = self.data.notes.get(idx)
-                    {
-                        self.data.active_note_id = Some(note.id.clone());
-                        self.focus_editor = true;
-                    }
-                }
-                if i.key_pressed(egui::Key::Num0)
-                    && let Some(note) = self.data.notes.last()
-                {
-                    self.data.active_note_id = Some(note.id.clone());
-                    self.focus_editor = true;
-                }
-            }
-
-            // ArrowUp, ArrowDown, Enter inside search drawer
-            if self.show_search && !self.data.notes.is_empty() {
-                let query = self.search_query.trim().to_lowercase();
-                let filtered_count = self
-                    .data
-                    .notes
-                    .iter()
-                    .filter(|n| {
-                        query.is_empty()
-                            || n.title.to_lowercase().contains(&query)
-                            || n.content.to_lowercase().contains(&query)
-                    })
-                    .count();
-
-                if filtered_count > 0 {
-                    if self.search_selected_idx >= filtered_count {
-                        self.search_selected_idx = 0;
-                    }
-                    if i.key_pressed(egui::Key::ArrowDown) {
-                        self.search_selected_idx = (self.search_selected_idx + 1) % filtered_count;
-                    }
-                    if i.key_pressed(egui::Key::ArrowUp) {
-                        if self.search_selected_idx == 0 {
-                            self.search_selected_idx = filtered_count - 1;
-                        } else {
-                            self.search_selected_idx -= 1;
-                        }
-                    }
-                    if i.key_pressed(egui::Key::Enter) {
-                        let filtered_notes: Vec<_> = self
-                            .data
-                            .notes
-                            .iter()
-                            .filter(|n| {
-                                query.is_empty()
-                                    || n.title.to_lowercase().contains(&query)
-                                    || n.content.to_lowercase().contains(&query)
-                            })
-                            .collect();
-                        if let Some(note) = filtered_notes.get(self.search_selected_idx) {
-                            self.data.active_note_id = Some(note.id.clone());
-                            self.show_search = false;
-                            self.focus_editor = true;
-                        }
-                    }
-                }
-            }
-
-            // Escape: Close modals if open, else close app window
-            if i.key_pressed(egui::Key::Escape) {
-                if self.confirm_close_id.is_some() {
-                    self.confirm_close_id = None;
-                } else if self.show_options || self.show_search {
-                    self.show_options = false;
-                    self.show_search = false;
-                    self.focus_editor = true;
-                } else {
-                    self.save_if_dirty();
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
-                }
-            }
-        });
+    /// Explicitly forces an immediate save of all notes and settings to disk, syncing linked external files.
+    pub fn save_notes_to_disk(&mut self) {
+        self.is_dirty = true;
+        self.save_if_dirty();
+        self.set_status("Saved to disk ✓");
     }
 
     /// Saves notes and settings if dirty flag is set.
-    fn save_if_dirty(&mut self) {
-        if self.is_dirty && self.data.save().is_ok() {
+    /// If notes are linked to external files on disk, they are saved directly to their respective file paths.
+    pub fn save_if_dirty(&mut self) {
+        if self.is_dirty {
+            if self.data.settings.trim_trailing_whitespace {
+                for note in &mut self.data.notes {
+                    if note
+                        .content
+                        .lines()
+                        .any(|l| l.ends_with(' ') || l.ends_with('\t'))
+                    {
+                        let trimmed: Vec<&str> =
+                            note.content.lines().map(|l| l.trim_end()).collect();
+                        let mut new_content = trimmed.join("\n");
+                        if note.content.ends_with('\n') {
+                            new_content.push('\n');
+                        }
+                        note.content = new_content;
+                    }
+                }
+            }
+
+            // Sync any externally linked notes directly to their target files on disk
+            let mut sync_errors = Vec::new();
+            let mut linked_count = 0;
+            for note in &self.data.notes {
+                if let Some(ref path_str) = note.file_path {
+                    linked_count += 1;
+                    let path = std::path::Path::new(path_str);
+                    if let Err(e) = crate::storage::atomic_write_file(path, note.content.as_bytes())
+                    {
+                        sync_errors.push(format!("{}: {}", note.title, e));
+                    }
+                }
+            }
+
+            let _ = crate::storage::save_app_data(&self.data);
             self.is_dirty = false;
-            self.set_status("Auto-saved");
-        }
-    }
 
-    /// Renders the main glass editor box containing header, workspace, and status bar.
-    fn render_main_editor(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        theme::glass_editor_frame(self.data.settings.opacity, self.data.settings.theme_mode).show(
-            ui,
-            |ui| {
-                ui.vertical(|ui| {
-                    // 1. Sleek Header Bar
-                    ui::header::render_header(self, ctx, ui);
-
-                    // Divider line below header
-                    ui::draw_horizontal_divider(ui);
-
-                    // 2. Body Area (Editor vs Options Drawer vs Search Drawer)
-                    let font_size = self.data.settings.font_size;
-                    let is_monospace = self.data.settings.monospace_font;
-                    let mut content_changed = false;
-                    let should_focus = self.focus_editor;
-
-                    egui::Frame::NONE
-                        .inner_margin(Margin::symmetric(14, 10))
-                        .show(ui, |ui| {
-                            if self.show_options {
-                                ui::options_drawer::render_options_drawer(self, ctx, ui);
-                            } else if self.show_search {
-                                ui::search_drawer::render_search_drawer(self, ctx, ui);
-                            } else if let Some(note) = self.active_note_mut() {
-                                let editor_height = ui.available_height() - 34.0;
-                                egui::ScrollArea::vertical()
-                                    .id_salt("editor_scroll_area")
-                                    .auto_shrink([false, false])
-                                    .max_height(editor_height)
-                                    .show(ui, |ui| {
-                                        ui.horizontal_top(|ui| {
-                                            // Line numbers column (chunked Label rendering for exact font matching and 100,000+ lines)
-                                            let line_count =
-                                                note.content.split('\n').count().max(1);
-                                            let line_font = if is_monospace {
-                                                FontId::monospace(font_size)
-                                            } else {
-                                                FontId::proportional(font_size)
-                                            };
-
-                                            ui.vertical(|ui| {
-                                                let chunk_size = 300;
-                                                for chunk_start in
-                                                    (1..=line_count).step_by(chunk_size)
-                                                {
-                                                    let chunk_end = (chunk_start + chunk_size - 1)
-                                                        .min(line_count);
-                                                    let chunk_str = (chunk_start..=chunk_end)
-                                                        .map(|n| n.to_string())
-                                                        .collect::<Vec<_>>()
-                                                        .join("\n");
-
-                                                    ui.add(egui::Label::new(
-                                                        RichText::new(&chunk_str)
-                                                            .font(line_font.clone())
-                                                            .color(Color32::from_gray(110)),
-                                                    ));
-                                                }
-                                            });
-
-                                            ui.add_space(8.0);
-
-                                            // Vertical line separator
-                                            let line_height = font_size * 1.3 * line_count as f32;
-                                            let (_, rect) = ui.allocate_space(egui::vec2(
-                                                1.0,
-                                                line_height.max(editor_height),
-                                            ));
-                                            ui.painter().line_segment(
-                                                [rect.min, egui::pos2(rect.min.x, rect.max.y)],
-                                                Stroke::new(
-                                                    1.0_f32,
-                                                    Color32::from_rgba_unmultiplied(
-                                                        80, 50, 110, 60,
-                                                    ),
-                                                ),
-                                            );
-
-                                            ui.add_space(8.0);
-
-                                            // Multiline text editor
-                                            let font = if is_monospace {
-                                                FontId::monospace(font_size)
-                                            } else {
-                                                FontId::proportional(font_size)
-                                            };
-
-                                            let text_edit =
-                                                egui::TextEdit::multiline(&mut note.content)
-                                                    .id(egui::Id::new(format!(
-                                                        "editor_{}",
-                                                        note.id
-                                                    )))
-                                                    .font(font)
-                                                    .desired_width(f32::INFINITY)
-                                                    .lock_focus(true)
-                                                    .frame(egui::Frame::NONE);
-
-                                            let response = ui.add(text_edit);
-                                            if should_focus {
-                                                response.request_focus();
-                                            }
-                                            if response.changed() {
-                                                note.update_timestamp();
-                                                content_changed = true;
-                                            }
-                                        });
-                                    });
-                            } else {
-                                ui.centered_and_justified(|ui| {
-                                    ui.label(
-                                        RichText::new("No note open. Press '+' to create one.")
-                                            .color(Color32::GRAY),
-                                    );
-                                });
-                            }
-                        });
-
-                    if should_focus {
-                        self.focus_editor = false;
-                    }
-
-                    if content_changed {
-                        self.is_dirty = true;
-                    }
-
-                    // Divider line above status bar
-                    ui::draw_horizontal_divider(ui);
-
-                    // 3. Status Bar at bottom of Editor Box
-                    egui::Frame::NONE
-                        .inner_margin(Margin::symmetric(14, 6))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                // Left: Green status dot ● Saved
-                                ui.label(RichText::new("●").size(10.0).color(ACCENT_EMERALD));
-                                ui.label(
-                                    RichText::new("Saved")
-                                        .size(12.0)
-                                        .color(Color32::from_gray(210)),
-                                );
-
-                                // Right stats: Words: X | Characters: Y | Ln A, Col B | UTF-8
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.spacing_mut().item_spacing.x = 14.0;
-
-                                        ui.label(
-                                            RichText::new("UTF-8")
-                                                .size(12.0)
-                                                .color(Color32::from_gray(170)),
-                                        );
-
-                                        if let Some(note) = self.active_note() {
-                                            let line_count =
-                                                note.content.split('\n').count().max(1);
-                                            let last_line_len = note
-                                                .content
-                                                .split('\n')
-                                                .next_back()
-                                                .unwrap_or("")
-                                                .chars()
-                                                .count()
-                                                + 1;
-
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "Ln {}, Col {}",
-                                                    line_count, last_line_len
-                                                ))
-                                                .size(12.0)
-                                                .color(Color32::from_gray(170)),
-                                            );
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "Characters: {}",
-                                                    note.char_count()
-                                                ))
-                                                .size(12.0)
-                                                .color(Color32::from_gray(170)),
-                                            );
-                                            ui.label(
-                                                RichText::new(format!(
-                                                    "Words: {}",
-                                                    note.word_count()
-                                                ))
-                                                .size(12.0)
-                                                .color(Color32::from_gray(170)),
-                                            );
-                                        }
-                                    },
-                                );
-                            });
-                        });
-                });
-            },
-        );
-    }
-    /// Opens a native file dialog (Zenity/Kdialog) to import any text file from Dolphin.
-    pub fn open_file_dialog(&mut self) {
-        let output = std::process::Command::new("zenity")
-            .arg("--file-selection")
-            .output()
-            .or_else(|_| {
-                std::process::Command::new("kdialog")
-                    .arg("--getopenfilename")
-                    .output()
-            });
-
-        if let Ok(out) = output
-            && out.status.success()
-        {
-            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let path = std::path::Path::new(&path_str);
-            if path.exists()
-                && path.is_file()
-                && let Ok(content) = std::fs::read_to_string(path)
-            {
-                let name = path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "imported.txt".to_string());
-
-                let id = format!("note-{}", chrono::Local::now().timestamp_millis());
-                let mut note = Note::new(id.clone(), name.clone());
-                note.content = content;
-                self.data.notes.push(note);
-                self.data.active_note_id = Some(id);
-                self.focus_editor = true;
-                self.is_dirty = true;
-                self.set_status(format!("Opened {}", name));
+            if !sync_errors.is_empty() {
+                self.set_status(format!("Disk save warning: {}", sync_errors.join(", ")));
+            } else if linked_count > 0 {
+                self.set_status("Synced & saved");
+            } else {
+                self.set_status("Auto-saved");
             }
         }
     }
 
-    /// Handles drag-and-dropped files, file URIs (file://), or raw text snippets into the window.
-    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
-        let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
-        if dropped.is_empty() {
+    /// Main frame update cycle.
+    fn update_app(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        if self.is_closing {
             return;
         }
 
-        let mut files_to_open: Vec<(String, String)> = Vec::new();
-
-        for file in dropped {
-            let path = file.path();
-            if path.exists()
-                && path.is_file()
-                && let Ok(content) = std::fs::read_to_string(path)
-            {
-                let name = path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "dropped.txt".to_string());
-                files_to_open.push((name, content));
-                continue;
-            }
-
-            if let Ok(bytes) = file.bytes() {
-                self.process_dropped_bytes(&bytes, &mut files_to_open);
-            }
-        }
-
-        // Open collected dropped files as new tabs
-        for (name, content) in files_to_open {
-            if let Some(existing) = self
-                .data
-                .notes
-                .iter()
-                .find(|n| n.title == name && n.content == content)
-            {
-                self.data.active_note_id = Some(existing.id.clone());
-            } else {
-                let id = format!("note-{}", chrono::Local::now().timestamp_millis());
-                let mut note = Note::new(id.clone(), name.clone());
-                note.content = content;
-                self.data.notes.push(note);
-                self.data.active_note_id = Some(id);
-                self.is_dirty = true;
-            }
-            self.focus_editor = true;
-            self.set_status(format!("Opened {}", name));
-        }
-    }
-
-    /// Helper to process byte payload from Dolphin / Wayland dropped files or file:// URI strings
-    fn process_dropped_bytes(&self, bytes: &[u8], out: &mut Vec<(String, String)>) {
-        let raw_text = String::from_utf8_lossy(bytes);
-        let mut opened_any = false;
-
-        for line in raw_text.lines() {
-            let line = line
-                .trim_matches(|c: char| c == '\0' || c == '\r' || c == '\n' || c.is_whitespace());
-            if line.is_empty() {
-                continue;
-            }
-
-            let unquoted = line.trim_matches('"').trim_matches('\'');
-            let decoded = url_decode(unquoted);
-
-            let path_str = if decoded.starts_with("file://") {
-                decoded.trim_start_matches("file://")
-            } else if unquoted.starts_with("file://") {
-                unquoted.trim_start_matches("file://")
-            } else if decoded.starts_with("file:") {
-                decoded.trim_start_matches("file:")
-            } else {
-                decoded.as_str()
-            };
-
-            let path = std::path::Path::new(path_str);
-            if path.exists()
-                && path.is_file()
-                && let Ok(content) = std::fs::read_to_string(path)
-            {
-                let name = path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "dropped.txt".to_string());
-                out.push((name, content));
-                opened_any = true;
-                continue;
-            }
-        }
-
-        if !opened_any && !raw_text.trim().is_empty() {
-            out.push(("dropped_snippet.txt".to_string(), raw_text.to_string()));
-        }
-    }
-}
-
-/// Decodes percent-encoded URL strings (e.g. `%20` -> ` `).
-fn url_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(val) = u8::from_str_radix(&s[i + 1..i + 3], 16)
-        {
-            result.push(val as char);
-            i += 3;
-            continue;
-        }
-        result.push(bytes[i] as char);
-        i += 1;
-    }
-    result
-}
-
-impl QuickyNotesApp {
-    /// Internal frame update method.
-    fn update_app(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        self.handle_dropped_files(ctx);
-        self.handle_keyboard_shortcuts(ctx);
-
         if ctx.input(|i| i.viewport().close_requested()) {
+            self.is_closing = true;
             self.save_if_dirty();
+            return;
         }
 
+        ui::drag_drop::handle_dropped_files(self, ctx);
+        ui::shortcuts::handle_keyboard_shortcuts(self, ctx);
+
+        // Auto-save interval check
         if self.last_auto_save.elapsed()
             > Duration::from_secs(self.data.settings.auto_save_seconds as u64)
         {
@@ -774,167 +311,23 @@ impl QuickyNotesApp {
             self.last_auto_save = Instant::now();
         }
 
-        // Real-time wallpaper theme sync (polls Caelestia/Pywal every 1s)
+        // Real-time wallpaper theme sync (polls Caelestia/Pywal every 1s with mtime caching)
         if self.data.settings.theme_mode == theme::ThemeMode::WallpaperSync
             && self.last_wallpaper_check.elapsed() > Duration::from_secs(1)
         {
             self.last_wallpaper_check = Instant::now();
             if theme::check_wallpaper_color_change(&mut self.last_wallpaper_colors) {
-                theme::setup_glassmorphism_theme(
-                    ctx,
-                    self.data.settings.opacity,
-                    theme::ThemeMode::WallpaperSync,
-                );
+                theme::setup_glassmorphism_theme(ctx, &self.data.settings);
                 ctx.request_repaint();
             }
         }
 
-        // Clean main window panel with integrated drawers
-        self.render_main_editor(ctx, ui);
+        // Render main editor and active drawers
+        ui::editor::render_main_editor(self, ctx, ui);
 
-        // Render Close Tab Confirmation Modal as a robust foreground overlay
-        if let Some(close_id) = self.confirm_close_id.clone() {
-            let note_title = self
-                .data
-                .notes
-                .iter()
-                .find(|n| n.id == close_id)
-                .map(|n| {
-                    if n.title.trim().is_empty() {
-                        "untitled.txt".to_string()
-                    } else {
-                        n.title.clone()
-                    }
-                })
-                .unwrap_or_else(|| "note".to_string());
-
-            let palette = theme::get_palette(self.data.settings.theme_mode);
-
-            egui::Area::new(egui::Id::new("confirm_close_modal"))
-                .order(egui::Order::Foreground)
-                .fixed_pos(egui::Pos2::ZERO)
-                .show(ctx, |ui| {
-                    let screen_rect = ui.clip_rect();
-
-                    // Dimmed backdrop mask
-                    ui.painter().rect_filled(
-                        screen_rect,
-                        CornerRadius::ZERO,
-                        Color32::from_black_alpha(170),
-                    );
-
-                    let modal_size = egui::vec2(340.0, 140.0);
-                    let modal_rect = egui::Rect::from_center_size(screen_rect.center(), modal_size);
-
-                    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(modal_rect));
-
-                    theme::glass_card_frame(
-                        self.data.settings.opacity,
-                        self.data.settings.theme_mode,
-                    )
-                    .show(&mut child_ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.spacing_mut().item_spacing.y = 10.0;
-
-                            ui.label(
-                                RichText::new("⚠️ Close Note Tab?")
-                                    .font(FontId::proportional(15.0))
-                                    .strong()
-                                    .color(theme::ACCENT_AMBER),
-                            );
-
-                            ui.label(
-                                RichText::new(format!(
-                                    "Are you sure you want to close '{}'?",
-                                    note_title
-                                ))
-                                .font(FontId::proportional(13.0))
-                                .color(Color32::from_gray(220)),
-                            );
-
-                            ui.add_space(6.0);
-
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 12.0;
-
-                                let cancel_btn = ui.add(
-                                    egui::Button::new(
-                                        RichText::new("Cancel (Esc)")
-                                            .font(FontId::proportional(12.5))
-                                            .color(Color32::WHITE),
-                                    )
-                                    .fill(Color32::from_rgba_unmultiplied(
-                                        palette.card.r(),
-                                        palette.card.g(),
-                                        palette.card.b(),
-                                        220,
-                                    ))
-                                    .stroke(Stroke::new(1.0_f32, Color32::from_gray(120)))
-                                    .corner_radius(CornerRadius::same(8))
-                                    .min_size(egui::vec2(100.0, 32.0)),
-                                );
-
-                                if cancel_btn.clicked()
-                                    || ctx.input(|i| i.key_pressed(egui::Key::Escape))
-                                {
-                                    self.confirm_close_id = None;
-                                    ctx.request_repaint();
-                                }
-
-                                let confirm_btn = ui.add(
-                                    egui::Button::new(
-                                        RichText::new("🗑 Close Tab")
-                                            .font(FontId::proportional(12.5))
-                                            .strong()
-                                            .color(Color32::WHITE),
-                                    )
-                                    .fill(Color32::from_rgba_unmultiplied(180, 45, 60, 240))
-                                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(239, 68, 68)))
-                                    .corner_radius(CornerRadius::same(8))
-                                    .min_size(egui::vec2(110.0, 32.0)),
-                                );
-
-                                if confirm_btn.clicked()
-                                    || ctx.input(|i| i.key_pressed(egui::Key::Enter))
-                                {
-                                    self.close_note(&close_id);
-                                    self.confirm_close_id = None;
-                                    ctx.request_repaint();
-                                }
-                            });
-                        });
-                    });
-                });
-        }
-
-        // Render drag-and-drop hover overlay if files are being dragged over window
-        if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
-            egui::Area::new(egui::Id::new("drop_overlay"))
-                .order(egui::Order::Foreground)
-                .fixed_pos(egui::Pos2::ZERO)
-                .show(ctx, |ui| {
-                    let rect = ui.clip_rect();
-                    ui.allocate_rect(rect, egui::Sense::hover());
-                    ui.painter().rect_filled(
-                        rect,
-                        CornerRadius::same(12),
-                        Color32::from_rgba_unmultiplied(18, 12, 28, 220),
-                    );
-                    ui.painter().rect_stroke(
-                        rect.shrink(8.0),
-                        CornerRadius::same(10),
-                        Stroke::new(2.0_f32, ACCENT_PURPLE),
-                        egui::StrokeKind::Outside,
-                    );
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "📥 Drop text file to open as a new tab",
-                        FontId::proportional(18.0),
-                        Color32::WHITE,
-                    );
-                });
-        }
+        // Render modal overlays
+        ui::editor::render_close_confirmation_modal(self, ctx);
+        ui::editor::render_drop_hover_overlay(ctx);
     }
 }
 
@@ -945,8 +338,74 @@ impl eframe::App for QuickyNotesApp {
     }
 
     fn on_exit(&mut self) {
-        if self.is_dirty {
-            let _ = self.data.save();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.save_if_dirty();
+        }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_app() -> QuickyNotesApp {
+        let mut data = AppData::default_initial();
+        data.sanitize_and_validate();
+        QuickyNotesApp {
+            data,
+            search_query: String::new(),
+            search_selected_idx: 0,
+            editing_title_id: None,
+            show_options: false,
+            show_search: false,
+            focus_search: false,
+            focus_editor: true,
+            preview_mode: MarkdownViewMode::Edit,
+            settings_tab: SettingsTab::General,
+            status_msg: None,
+            last_auto_save: Instant::now(),
+            last_wallpaper_check: Instant::now(),
+            last_wallpaper_colors: None,
+            confirm_close_id: None,
+            is_closing: false,
+            is_dirty: false,
         }
+    }
+
+    #[test]
+    fn test_app_create_and_close_notes() {
+        let mut app = create_test_app();
+        let initial_len = app.data.notes.len();
+        app.create_new_note();
+        assert_eq!(app.data.notes.len(), initial_len + 1);
+
+        let new_id = app.data.active_note_id.clone().unwrap();
+        app.close_note(&new_id);
+        assert_eq!(app.data.notes.len(), initial_len);
+    }
+
+    #[test]
+    fn test_linked_note_direct_disk_sync() {
+        let mut app = create_test_app();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "quicky_notes_test_sync_{}",
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let external_file = temp_dir.join("linked_doc.txt");
+        std::fs::write(&external_file, "Initial file contents").unwrap();
+
+        let mut note = Note::new("test-linked-1".to_string(), "linked_doc.txt".to_string());
+        note.content = "Modified content inside Quicky Notes".to_string();
+        note.file_path = Some(external_file.to_string_lossy().to_string());
+        app.data.notes.push(note);
+        app.data.active_note_id = Some("test-linked-1".to_string());
+
+        app.save_notes_to_disk();
+
+        let disk_content = std::fs::read_to_string(&external_file).unwrap();
+        assert_eq!(disk_content, "Modified content inside Quicky Notes");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

@@ -1,11 +1,15 @@
-//! System font discovery and dynamic TTF binary loading via `fontconfig`.
+//! System font discovery, dynamic TTF loading via `fontconfig`, and startup font setup.
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
+use std::collections::HashMap;
+use std::fs;
 use std::process::Command;
-
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 static CACHED_SYSTEM_FONTS: OnceLock<Vec<String>> = OnceLock::new();
+static CACHED_FONT_PATHS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+static CACHED_EMOJI_BYTES: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+static CACHED_MONO_BYTES: OnceLock<Option<Vec<u8>>> = OnceLock::new();
 
 /// Discovers installed system font family names on Linux via `fc-list`.
 /// Results are cached in a OnceLock to eliminate UI thread blocking.
@@ -62,44 +66,165 @@ pub fn get_installed_system_fonts() -> Vec<String> {
         .clone()
 }
 
-/// Resolves font file path via `fc-match` and applies the TTF font family dynamically to egui.
-pub fn apply_system_font(ctx: &egui::Context, font_name: &str) {
-    if font_name == "Default" || font_name.is_empty() {
-        return;
+/// Queries fontconfig (`fc-match`) to resolve the exact file path of any font family or pattern on Linux.
+/// Results are cached in a thread-safe Mutex<HashMap> to eliminate repeated subprocess spawning.
+pub fn resolve_font_path(pattern: &str) -> Option<String> {
+    let cache_map = CACHED_FONT_PATHS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache_map.lock()
+        && let Some(cached) = guard.get(pattern)
+    {
+        return cached.clone();
     }
 
-    if let Ok(output) = Command::new("fc-match")
+    let resolved = if let Ok(output) = Command::new("fc-match")
         .arg("-f")
         .arg("%{file}")
-        .arg(font_name)
+        .arg(pattern)
         .output()
         && output.status.success()
     {
-        let file_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !file_path.is_empty()
-            && std::path::Path::new(&file_path).exists()
-            && let Ok(bytes) = std::fs::read(&file_path)
-        {
-            let mut font_defs = FontDefinitions::default();
-            let font_key = format!("sys_font_{}", font_name);
+        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path_str.is_empty() && std::path::Path::new(&path_str).exists() {
+            Some(path_str)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
-            font_defs
-                .font_data
-                .insert(font_key.clone(), FontData::from_owned(bytes).into());
+    if let Ok(mut guard) = cache_map.lock() {
+        guard.insert(pattern.to_string(), resolved.clone());
+    }
 
+    resolved
+}
+
+/// Dynamically discovers and loads system color emoji font bytes via fontconfig.
+/// Result is cached in a OnceLock to read the TTF file only once.
+pub fn get_system_emoji_font_bytes() -> Option<Vec<u8>> {
+    CACHED_EMOJI_BYTES
+        .get_or_init(|| {
+            if let Some(path) = resolve_font_path("emoji")
+                && let Ok(bytes) = fs::read(&path)
+            {
+                return Some(bytes);
+            }
+            None
+        })
+        .clone()
+}
+
+/// Dynamically discovers and loads the system monospace / nerd font via fontconfig.
+/// Result is cached in a OnceLock to read the TTF file only once.
+pub fn get_system_monospace_font_bytes() -> Option<Vec<u8>> {
+    CACHED_MONO_BYTES
+        .get_or_init(|| {
+            for query in ["FiraCode Nerd Font", "JetBrainsMono Nerd Font", "monospace"] {
+                if let Some(path) = resolve_font_path(query)
+                    && let Ok(bytes) = fs::read(&path)
+                {
+                    return Some(bytes);
+                }
+            }
+            None
+        })
+        .clone()
+}
+
+/// Dynamically injects system monospace and color emoji fonts on startup.
+pub fn setup_default_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+
+    if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
+        fonts.font_data.insert(
+            "system_emoji".to_owned(),
+            FontData::from_owned(emoji_bytes).into(),
+        );
+    }
+
+    if let Some(mono_bytes) = get_system_monospace_font_bytes() {
+        fonts.font_data.insert(
+            "system_mono".to_owned(),
+            FontData::from_owned(mono_bytes).into(),
+        );
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .insert(0, "system_mono".to_owned());
+        fonts
+            .families
+            .entry(FontFamily::Monospace)
+            .or_default()
+            .insert(0, "system_mono".to_owned());
+    }
+
+    if fonts.font_data.contains_key("system_emoji") {
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .push("system_emoji".to_owned());
+        fonts
+            .families
+            .entry(FontFamily::Monospace)
+            .or_default()
+            .push("system_emoji".to_owned());
+    }
+
+    ctx.set_fonts(fonts);
+}
+
+/// Resolves font file path via fontconfig and applies the TTF font family dynamically to egui with color emoji fallback.
+pub fn apply_system_font(ctx: &egui::Context, font_name: &str) {
+    if font_name == "Default" || font_name.trim().is_empty() {
+        setup_default_fonts(ctx);
+        return;
+    }
+
+    if let Some(file_path) = resolve_font_path(font_name)
+        && let Ok(bytes) = std::fs::read(&file_path)
+    {
+        let mut font_defs = FontDefinitions::default();
+        let font_key = format!("sys_font_{}", font_name);
+
+        if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
+            font_defs.font_data.insert(
+                "system_emoji".to_owned(),
+                FontData::from_owned(emoji_bytes).into(),
+            );
+        }
+
+        font_defs
+            .font_data
+            .insert(font_key.clone(), FontData::from_owned(bytes).into());
+
+        font_defs
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .insert(0, font_key.clone());
+
+        font_defs
+            .families
+            .entry(FontFamily::Monospace)
+            .or_default()
+            .insert(0, font_key);
+
+        if font_defs.font_data.contains_key("system_emoji") {
             font_defs
                 .families
                 .entry(FontFamily::Proportional)
                 .or_default()
-                .insert(0, font_key.clone());
-
+                .push("system_emoji".to_owned());
             font_defs
                 .families
                 .entry(FontFamily::Monospace)
                 .or_default()
-                .insert(0, font_key);
-
-            ctx.set_fonts(font_defs);
+                .push("system_emoji".to_owned());
         }
+
+        ctx.set_fonts(font_defs);
     }
 }
