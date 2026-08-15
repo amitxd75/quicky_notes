@@ -558,7 +558,7 @@ pub mod badge {
     }
 
     /// Renders an interactive pin badge indicator icon for tab pinning.
-    pub fn pin_badge(ui: &mut Ui, _color: Color32) -> egui::Response {
+    pub fn pin_badge(ui: &mut Ui) -> egui::Response {
         ui.add(
             egui::Label::new(RichText::new("📌").size(12.5).color(Color32::WHITE))
                 .sense(Sense::click()),

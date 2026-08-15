@@ -25,7 +25,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
             for note in &app.data.notes {
                 let is_active = active_id == Some(note.id.as_str());
-                let is_editing = app.editing_title_id.as_deref() == Some(note.id.as_str());
+                let is_editing = app.editing_title.as_ref().map(|(id, _)| id.as_str()) == Some(note.id.as_str());
 
                 // Smooth tab transition animation (using note.id hash directly to avoid string alloc)
                 let active_anim = ctx.animate_bool_with_time(
@@ -81,7 +81,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
                         // Pin icon indicator for pinned notes
                         if note.pinned {
-                            let pin_btn = badge::pin_badge(ui, theme::ACCENT_AMBER);
+                            let pin_btn = badge::pin_badge(ui);
                             if pin_btn.on_hover_text("Unpin note").clicked() {
                                 tab_to_pin = Some(note.id.clone());
                             }
@@ -92,8 +92,9 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
                         // Editable Title or Clickable Label
                         if is_editing {
-                            let mut title_buf = note.title.clone();
-                            let title_edit = egui::TextEdit::singleline(&mut title_buf)
+                            // Use persistent buffer stored in app state across frames
+                            let buf = &mut app.editing_title.as_mut().unwrap().1;
+                            let title_edit = egui::TextEdit::singleline(buf)
                                 .font(FontId::proportional(13.0))
                                 .text_color(Color32::WHITE)
                                 .frame(egui::Frame::NONE)
@@ -102,7 +103,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             resp.request_focus();
 
                             if resp.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                rename_finish = Some((note.id.clone(), title_buf));
+                                rename_finish = Some((note.id.clone(), buf.clone()));
                             }
                         } else {
                             let base_title = if note.title.trim().is_empty() {
@@ -171,7 +172,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                                     ui.close();
                                 }
                                 if ui.button("Rename").clicked() {
-                                    app.editing_title_id = Some(note.id.clone());
+                                    app.editing_title = Some((note.id.clone(), note.title.clone()));
                                     ui.close();
                                 }
                                 if let Some(ref fp) = note.file_path {
@@ -182,9 +183,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                                     }
                                     if ui.button("📂 Open Folder in File Manager").clicked() {
                                         if let Some(parent) = std::path::Path::new(fp).parent() {
-                                            let _ = std::process::Command::new("xdg-open")
-                                                .arg(parent)
-                                                .spawn();
+                                            crate::ui::drag_drop::safe_open_folder(parent);
                                         }
                                         ui.close();
                                     }
@@ -201,7 +200,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             }
 
                             if tab_btn.double_clicked() {
-                                app.editing_title_id = Some(note.id.clone());
+                                app.editing_title = Some((note.id.clone(), note.title.clone()));
                             }
                         }
 
@@ -233,7 +232,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         app.is_dirty = true;
                     }
                 }
-                app.editing_title_id = None;
+                app.editing_title = None;
             }
 
             if let Some(id) = tab_to_select {

@@ -129,7 +129,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
 }
 
 /// Renders the vertical navigation sidebar with left-aligned icons and labels.
-fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &theme::ThemePalette) {
+fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &theme::Palette) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
 
@@ -232,7 +232,7 @@ fn render_theme_palette_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     card::settings_card(ui, "THEME & COLOR PALETTE", palette, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -273,7 +273,7 @@ fn render_custom_colors_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     card::settings_card(ui, "CUSTOM THEME PALETTE COLORS", palette, |ui| {
         let mut color_changed = false;
@@ -324,7 +324,7 @@ fn render_system_font_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     card::settings_card(ui, "SYSTEM FONT", palette, |ui| {
         let fonts = crate::font::get_installed_system_fonts();
@@ -368,7 +368,7 @@ fn render_window_presets_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     card::settings_card(ui, "WINDOW SIZE PRESETS", palette, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -397,7 +397,7 @@ fn render_appearance_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     card::settings_card(ui, "WINDOW & GLASS STYLING", palette, |ui| {
         // Opacity Slider
@@ -475,7 +475,7 @@ fn render_editor_behavior_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     card::settings_card(ui, "EDITOR BEHAVIOR & TYPOGRAPHY", palette, |ui| {
         // Font Size Slider
@@ -594,7 +594,7 @@ fn render_editor_behavior_card(
 }
 
 /// Renders the Quick Actions export button card.
-fn render_quick_actions_card(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &theme::ThemePalette) {
+fn render_quick_actions_card(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &theme::Palette) {
     card::settings_card(ui, "QUICK ACTIONS", palette, |ui| {
         let export_btn = ui.add(
             egui::Button::new(
@@ -615,7 +615,7 @@ fn render_quick_actions_card(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
 }
 
 /// Renders file persistence, data directory opening, and backup info card.
-fn render_backup_info_card(ui: &mut Ui, palette: &theme::ThemePalette) {
+fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
     card::settings_card(ui, "STORAGE & DURABILITY", palette, |ui| {
         let path = crate::storage::AppData::config_path();
         ui.label(
@@ -642,7 +642,7 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::ThemePalette) {
             if open_folder_btn.clicked()
                 && let Some(parent) = path.parent()
             {
-                let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+                crate::ui::drag_drop::safe_open_folder(parent);
             }
         });
 
@@ -657,7 +657,7 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::ThemePalette) {
 }
 
 /// Renders the Keyboard Shortcuts reference card matching image.png.
-fn render_shortcuts_card(ui: &mut Ui, palette: &theme::ThemePalette) {
+fn render_shortcuts_card(ui: &mut Ui, palette: &theme::Palette) {
     card::settings_card(ui, "KEYBOARD SHORTCUTS", palette, |ui| {
         let help_items = [
             ("Ctrl + N", "New note tab"),
@@ -692,7 +692,7 @@ fn render_shortcuts_card(ui: &mut Ui, palette: &theme::ThemePalette) {
 }
 
 /// Renders the About This App card with developer text, version, and links.
-fn render_about_card(ui: &mut Ui, palette: &theme::ThemePalette) {
+fn render_about_card(ui: &mut Ui, palette: &theme::Palette) {
     card::settings_card(ui, "ABOUT THIS APP", palette, |ui| {
         ui.label(
             RichText::new(
@@ -711,7 +711,7 @@ fn render_about_card(ui: &mut Ui, palette: &theme::ThemePalette) {
         ui.horizontal(|ui| {
             let gh_btn = ui.add(
                 egui::Button::new(
-                    RichText::new("GitHub: amitxd75/quicky_notes ↗")
+                    RichText::new("GitHub ↗")
                         .font(FontId::proportional(12.0))
                         .color(Color32::WHITE),
                 )
@@ -737,7 +737,7 @@ fn render_bottom_bar(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
-    palette: &theme::ThemePalette,
+    palette: &theme::Palette,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
@@ -831,8 +831,9 @@ fn render_bottom_bar(
                     .color(Color32::from_gray(160)),
             );
 
-            if let Some(note) = app.active_note() {
-                let (words, chars, lines) = note.compute_stats();
+            // Use cached per-frame stats computation
+            {
+                let (words, chars, lines) = app.cached_active_stats;
 
                 ui.label(
                     RichText::new(format!(

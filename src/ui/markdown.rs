@@ -1,12 +1,11 @@
 //! Markdown preview renderer using pulldown-cmark, egui LayoutJob, and zero-allocation AST caching.
 
-use crate::theme::ThemePalette;
+use crate::theme::Palette;
 use eframe::egui::{
     self, Color32, CornerRadius, FontId, Margin, RichText, Stroke, Ui, text::LayoutJob,
     text::TextFormat,
 };
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
@@ -22,20 +21,25 @@ pub enum MarkdownBlock {
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct MarkdownCacheKey {
-    text_hash: u64,
+    text_hash_a: u64,
+    text_hash_b: u64,
     text_len: usize,
     font_size_bits: u32,
     is_monospace: bool,
     accent_rgba: u32,
 }
 
-static MARKDOWN_AST_CACHE: OnceLock<Mutex<HashMap<MarkdownCacheKey, Vec<MarkdownBlock>>>> =
-    OnceLock::new();
+type MarkdownAstCache = Vec<(MarkdownCacheKey, Vec<MarkdownBlock>)>;
 
-fn hash_text(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+static MARKDOWN_AST_CACHE: OnceLock<Mutex<MarkdownAstCache>> = OnceLock::new();
+
+fn hash_text_pair(text: &str) -> (u64, u64) {
+    let mut hasher1 = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher1);
+    let mut hasher2 = std::collections::hash_map::DefaultHasher::new();
+    let xored: Vec<u8> = text.as_bytes().iter().map(|&b| b ^ 0x55).collect();
+    xored.hash(&mut hasher2);
+    (hasher1.finish(), hasher2.finish())
 }
 
 /// Parses Markdown text into structured blocks for fast repeated rendering.
@@ -43,7 +47,7 @@ fn parse_markdown_blocks(
     text: &str,
     font_size: f32,
     is_monospace: bool,
-    palette: &ThemePalette,
+    palette: &Palette,
 ) -> Vec<MarkdownBlock> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
@@ -302,10 +306,12 @@ pub fn render_markdown(
     text: &str,
     font_size: f32,
     is_monospace: bool,
-    palette: &ThemePalette,
+    palette: &Palette,
 ) {
+    let (hash_a, hash_b) = hash_text_pair(text);
     let key = MarkdownCacheKey {
-        text_hash: hash_text(text),
+        text_hash_a: hash_a,
+        text_hash_b: hash_b,
         text_len: text.len(),
         font_size_bits: font_size.to_bits(),
         is_monospace,
@@ -316,23 +322,29 @@ pub fn render_markdown(
             .fold(0u32, |acc, b| (acc << 8) | b as u32),
     };
 
-    let cache = MARKDOWN_AST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = MARKDOWN_AST_CACHE.get_or_init(|| Mutex::new(Vec::new()));
     let blocks = {
         let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(cached) = guard.get(&key) {
-            cached.clone()
+        if let Some(pos) = guard.iter().position(|(k, _)| k == &key) {
+            // LRU hit: move to front
+            let entry = guard.remove(pos);
+            let blocks = entry.1.clone();
+            guard.insert(0, entry);
+            blocks
         } else {
-            // Evict if cache exceeds 48 items
-            if guard.len() > 48 {
-                guard.clear();
-            }
+            // Cache miss: parse, insert at front, evict oldest if over capacity
             let parsed = parse_markdown_blocks(text, font_size, is_monospace, palette);
-            guard.insert(key, parsed.clone());
+            guard.insert(0, (key, parsed.clone()));
+            if guard.len() > 32 {
+                guard.truncate(32);
+            }
             parsed
         }
     };
 
     ui.spacing_mut().item_spacing.y = 8.0;
+
+    let mut code_block_idx: usize = 0;
 
     for block in blocks {
         match block {
@@ -404,7 +416,7 @@ pub fn render_markdown(
 
                         ui.add_space(4.0);
                         egui::ScrollArea::horizontal()
-                            .id_salt("code_block_hscroll")
+                            .id_salt(format!("code_block_hscroll_{}", code_block_idx))
                             .show(ui, |ui| {
                                 ui.label(
                                     RichText::new(&code_text)
@@ -414,6 +426,7 @@ pub fn render_markdown(
                             });
                     });
                 ui.add_space(4.0);
+                code_block_idx += 1;
             }
             MarkdownBlock::Rule => {
                 ui.add_space(4.0);

@@ -48,7 +48,7 @@ Requires Rust and fontconfig.
 cargo install --path .
 ```
 
-Add to your `hyprland.lua` (or `keybinds.lua`):
+Add to your `hyprland.lua`:
 
 ```lua
 -- Keybind
@@ -62,6 +62,7 @@ hl.rule({
     opacity = 0.85,
 })
 ```
+
 
 ## License
 

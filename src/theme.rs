@@ -112,8 +112,6 @@ impl PaletteColors {
 
 /// Type alias for PaletteColors.
 pub type Palette = PaletteColors;
-/// Type alias for ThemePalette.
-pub type ThemePalette = PaletteColors;
 
 /// Helper struct for deserializing Pywal `colors.json`.
 #[derive(Deserialize)]
@@ -183,12 +181,17 @@ pub fn get_wallpaper_colors() -> Option<(Color32, Color32, Color32)> {
     let current_caelestia_mtime = get_file_mtime(&caelestia_path);
     let current_pywal_mtime = get_file_mtime(&pywal_path);
 
-    if let Ok(cache) = WALLPAPER_CACHE.lock()
-        && cache.colors.is_some()
-        && cache.caelestia_mtime == current_caelestia_mtime
-        && cache.pywal_mtime == current_pywal_mtime
     {
-        return cache.colors;
+        let cache = WALLPAPER_CACHE.lock().unwrap_or_else(|e| {
+            eprintln!("Warning: Wallpaper cache mutex poisoned, recovering");
+            e.into_inner()
+        });
+        if cache.colors.is_some()
+            && cache.caelestia_mtime == current_caelestia_mtime
+            && cache.pywal_mtime == current_pywal_mtime
+        {
+            return cache.colors;
+        }
     }
 
     // Try parsing Caelestia format first
@@ -199,18 +202,19 @@ pub fn get_wallpaper_colors() -> Option<(Color32, Color32, Color32)> {
 
         for line in content.lines() {
             let line = line.trim();
-            if line.contains("background=") {
-                if let Some(val) = line.split('=').nth(1) {
-                    bg = Some(hex_to_color(val));
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, raw_val)) = line.split_once('=') {
+                let key = key.trim();
+                let val = raw_val.trim().trim_matches('"').trim_matches('\'');
+                match key {
+                    "background" => bg = Some(hex_to_color(val)),
+                    "color4" | "primary" => accent = Some(hex_to_color(val)),
+                    "color1" => border = Some(hex_to_color(val)),
+                    _ => {}
                 }
-            } else if (line.contains("color4=") || line.contains("primary="))
-                && let Some(val) = line.split('=').nth(1)
-            {
-                accent = Some(hex_to_color(val));
-            } else if line.contains("color1=")
-                && let Some(val) = line.split('=').nth(1)
-            {
-                border = Some(hex_to_color(val));
             }
         }
 

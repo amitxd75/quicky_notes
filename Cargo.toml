@@ -1,7 +1,12 @@
 [package]
 name = "quicky_notes"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+license = "MIT"
+description = "Floating glassmorphism note widget for Hyprland & Wayland"
+repository = "https://github.com/amitxd/quicky_notes"
+authors = ["amitxd"]
+rust-version = "1.97"
 
 [dependencies]
 eframe = "0.36.1"

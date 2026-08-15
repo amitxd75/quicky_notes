@@ -18,6 +18,11 @@ pub const MIN_WINDOW_WIDTH: f32 = 480.0;
 /// Minimum allowed window height in pixels.
 pub const MIN_WINDOW_HEIGHT: f32 = 340.0;
 
+/// Maximum allowed window width in pixels.
+pub const MAX_WINDOW_WIDTH: f32 = 3840.0;
+/// Maximum allowed window height in pixels.
+pub const MAX_WINDOW_HEIGHT: f32 = 2160.0;
+
 /// Minimum allowed auto-save interval in seconds.
 pub const MIN_AUTO_SAVE_SECS: u32 = 1;
 /// Maximum allowed auto-save interval in seconds.
@@ -208,12 +213,18 @@ impl AppSettings {
             self.font_size = self.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
         }
 
-        if self.window_width.is_nan() || self.window_width < MIN_WINDOW_WIDTH {
+        if self.window_width.is_nan() {
             self.window_width = MIN_WINDOW_WIDTH;
+        } else {
+            self.window_width = self.window_width.clamp(MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH);
         }
 
-        if self.window_height.is_nan() || self.window_height < MIN_WINDOW_HEIGHT {
+        if self.window_height.is_nan() {
             self.window_height = MIN_WINDOW_HEIGHT;
+        } else {
+            self.window_height = self
+                .window_height
+                .clamp(MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT);
         }
 
         self.auto_save_seconds = self
@@ -276,5 +287,15 @@ mod tests {
         assert_eq!(settings.corner_radius, 24.0);
         assert_eq!(settings.default_extension, ".txt");
         assert_eq!(settings.selected_font, "Default");
+
+        // Test max clamping
+        let mut max_settings = AppSettings {
+            window_width: 10000.0,
+            window_height: 10000.0,
+            ..AppSettings::default()
+        };
+        max_settings.validate_and_clamp();
+        assert_eq!(max_settings.window_width, MAX_WINDOW_WIDTH);
+        assert_eq!(max_settings.window_height, MAX_WINDOW_HEIGHT);
     }
 }

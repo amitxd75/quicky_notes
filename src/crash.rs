@@ -1,5 +1,5 @@
 //! Crash reporting module that intercepts panics and dumps detailed diagnostic logs
-//! to `~/.local/share/quicky_notes/logs/log_<timestamp>.log` (or `logs/log_<timestamp>.log`).
+//! to `~/.config/quicky_notes/logs/log_<timestamp>.log` (or `logs/log_<timestamp>.log`).
 
 use std::fs::File;
 use std::io::Write;

@@ -40,5 +40,10 @@ jobs:
       - name: Run unit & integration tests
         run: cargo test --all-targets --verbose
 
+      - name: Security audit
+        run: cargo install cargo-audit && cargo audit
+
       - name: Verify release build
         run: cargo build --release
+
+

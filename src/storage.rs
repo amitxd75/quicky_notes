@@ -271,8 +271,12 @@ pub fn format_display_path(path_str: &str, max_chars: usize) -> String {
         .and_then(|u| u.home_dir().to_str().map(|s| s.to_string()))
         .unwrap_or_default();
 
-    let pretty_path = if !home_str.is_empty() && path_str.starts_with(&home_str) {
-        format!("~{}", &path_str[home_str.len()..])
+    let pretty_path = if !home_str.is_empty() {
+        if let Some(suffix) = path_str.strip_prefix(&home_str) {
+            format!("~{}", suffix)
+        } else {
+            path_str.to_string()
+        }
     } else {
         path_str.to_string()
     };
@@ -289,7 +293,11 @@ pub fn format_display_path(path_str: &str, max_chars: usize) -> String {
     }
 }
 
-/// Atomically writes arbitrary byte contents to a file path on disk, falling back to direct write.
+/// Atomically writes arbitrary byte contents to a file path on disk.
+///
+/// Uses a write-to-temp + rename strategy for atomicity. If the atomic rename fails
+/// (e.g., cross-filesystem, NFS, FUSE), falls back to direct `fs::write()` with a
+/// warning logged to stderr. The fallback is NOT crash-safe.
 pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), StorageError> {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -314,9 +322,14 @@ pub fn atomic_write_file(path: &Path, content: &[u8]) -> Result<(), StorageError
         Ok(())
     })();
 
-    if atomic_result.is_err() {
+    if let Err(ref rename_err) = atomic_result {
         let _ = fs::remove_file(&temp_path);
-        // Fallback to direct in-place write (works on symlinks, special mounts, /tmp, NFS/remotes)
+        // Fallback to direct in-place write (works on symlinks, special mounts, /tmp, NFS/remotes).
+        // WARNING: This write is NOT atomic — partial/truncated content is possible on crash.
+        eprintln!(
+            "Warning: Atomic rename failed for {:?} ({}), falling back to non-atomic write",
+            path, rename_err
+        );
         fs::write(path, content)?;
     }
 
@@ -331,9 +344,14 @@ mod tests {
     fn create_test_dir() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("quicky_notes_test_{}", nanos));
+        let thread_id = format!("{:?}", std::thread::current().id());
+        let dir = std::env::temp_dir().join(format!(
+            "quicky_notes_test_{}_{}",
+            nanos,
+            thread_id.replace(|c: char| !c.is_alphanumeric(), "")
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -352,7 +370,7 @@ mod tests {
 
         let loaded = AppData::load_from_path(&path);
         assert_eq!(loaded.notes.len(), initial.notes.len());
-        assert_eq!(loaded.notes[0].content, "Hello TigerStyle world!");
+        assert_eq!(loaded.notes[0].content, "Hello world!");
         assert_eq!(loaded.settings.font_size, 20.0);
         assert_eq!(loaded.active_note_id, Some("note-1".to_string()));
 

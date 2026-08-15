@@ -5,6 +5,7 @@ use crate::storage::AppData;
 use crate::theme;
 use crate::ui;
 use eframe::egui::{self, Color32, Ui, ViewportCommand};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// Markdown preview mode for note editing.
@@ -90,8 +91,9 @@ pub struct QuickyNotesApp {
     /// Highlighted index in search result list.
     pub search_selected_idx: usize,
 
-    /// ID of note title currently undergoing inline rename.
-    pub editing_title_id: Option<String>,
+    /// ID and text buffer of note title currently undergoing inline rename.
+    /// Stores `(note_id, editable_buffer)` so keystrokes persist across frames.
+    pub editing_title: Option<(String, String)>,
 
     /// Whether the Options & Settings drawer is open.
     pub show_options: bool,
@@ -131,14 +133,26 @@ pub struct QuickyNotesApp {
 
     /// Whether unsaved modifications exist.
     pub is_dirty: bool,
+
+    /// Receiver for async file dialog results.
+    pub file_dialog_rx: Option<mpsc::Receiver<Option<String>>>,
+
+    /// Receiver for async font loading results.
+    pub font_loading_rx: Option<mpsc::Receiver<egui::FontDefinitions>>,
+
+    /// Cached active note statistics (words, chars, lines), computed once per frame.
+    pub cached_active_stats: (usize, usize, usize),
+
+    /// Last timestamp for window size persistence check.
+    pub last_window_size_check: Instant,
 }
 
 impl QuickyNotesApp {
     /// Primary constructor using pre-loaded AppData.
+    ///
+    /// Font loading is performed asynchronously to avoid blocking the UI thread.
     pub fn new_with_data(cc: &eframe::CreationContext<'_>, data: AppData) -> Self {
-        crate::font::setup_default_fonts(&cc.egui_ctx);
         theme::setup_glassmorphism_theme(&cc.egui_ctx, &data.settings);
-        crate::font::apply_system_font(&cc.egui_ctx, &data.settings.selected_font);
         let initial_colors = theme::get_wallpaper_colors();
 
         if data.settings.always_on_top {
@@ -146,11 +160,14 @@ impl QuickyNotesApp {
                 .send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
         }
 
+        // Load fonts asynchronously on a background thread to avoid startup delay
+        let font_rx = crate::font::setup_fonts_async(&cc.egui_ctx, &data.settings.selected_font);
+
         Self {
             data,
             search_query: String::new(),
             search_selected_idx: 0,
-            editing_title_id: None,
+            editing_title: None,
             show_options: false,
             show_search: false,
             focus_search: false,
@@ -164,6 +181,10 @@ impl QuickyNotesApp {
             confirm_close_id: None,
             is_closing: false,
             is_dirty: false,
+            file_dialog_rx: None,
+            font_loading_rx: Some(font_rx),
+            cached_active_stats: (0, 0, 0),
+            last_window_size_check: Instant::now(),
         }
     }
 
@@ -233,58 +254,73 @@ impl QuickyNotesApp {
     }
 
     /// Explicitly forces an immediate save of all notes and settings to disk, syncing linked external files.
+    ///
+    /// Unlike auto-save, this always triggers a save regardless of the dirty flag.
     pub fn save_notes_to_disk(&mut self) {
-        self.is_dirty = true;
-        self.save_if_dirty();
+        self.save_if_dirty_inner(true);
         self.set_status("Saved to disk ✓");
     }
 
     /// Saves notes and settings if dirty flag is set.
     /// If notes are linked to external files on disk, they are saved directly to their respective file paths.
     pub fn save_if_dirty(&mut self) {
-        if self.is_dirty {
-            if self.data.settings.trim_trailing_whitespace {
-                for note in &mut self.data.notes {
-                    if note
-                        .content
-                        .lines()
-                        .any(|l| l.ends_with(' ') || l.ends_with('\t'))
-                    {
-                        let trimmed: Vec<&str> =
-                            note.content.lines().map(|l| l.trim_end()).collect();
-                        let mut new_content = trimmed.join("\n");
-                        if note.content.ends_with('\n') {
-                            new_content.push('\n');
-                        }
-                        note.content = new_content;
+        self.save_if_dirty_inner(false);
+    }
+
+    /// Internal save implementation. When `force` is true, saves even if not dirty (for explicit Ctrl+S).
+    fn save_if_dirty_inner(&mut self, force: bool) {
+        if !self.is_dirty && !force {
+            return;
+        }
+
+        if self.data.settings.trim_trailing_whitespace {
+            for note in &mut self.data.notes {
+                if note
+                    .content
+                    .lines()
+                    .any(|l| l.ends_with(' ') || l.ends_with('\t'))
+                {
+                    let trimmed: Vec<&str> = note.content.lines().map(|l| l.trim_end()).collect();
+                    let mut new_content = trimmed.join("\n");
+                    if note.content.ends_with('\n') {
+                        new_content.push('\n');
                     }
+                    note.content = new_content;
                 }
             }
+        }
 
-            // Sync any externally linked notes directly to their target files on disk
-            let mut sync_errors = Vec::new();
-            let mut linked_count = 0;
-            for note in &self.data.notes {
-                if let Some(ref path_str) = note.file_path {
-                    linked_count += 1;
-                    let path = std::path::Path::new(path_str);
-                    if let Err(e) = crate::storage::atomic_write_file(path, note.content.as_bytes())
-                    {
-                        sync_errors.push(format!("{}: {}", note.title, e));
-                    }
+        // Sync any externally linked notes directly to their target files on disk
+        let mut sync_errors = Vec::new();
+        let mut linked_count = 0;
+        for note in &self.data.notes {
+            if let Some(ref path_str) = note.file_path {
+                linked_count += 1;
+                let path = std::path::Path::new(path_str);
+                if let Err(e) = crate::storage::atomic_write_file(path, note.content.as_bytes()) {
+                    sync_errors.push(format!("{}: {}", note.title, e));
                 }
             }
+        }
 
-            let _ = crate::storage::save_app_data(&self.data);
-            self.is_dirty = false;
-
-            if !sync_errors.is_empty() {
-                self.set_status(format!("Disk save warning: {}", sync_errors.join(", ")));
-            } else if linked_count > 0 {
-                self.set_status("Synced & saved");
-            } else {
-                self.set_status("Auto-saved");
+        // Check save result and re-set dirty on failure
+        match crate::storage::save_app_data(&self.data) {
+            Ok(()) => {
+                self.is_dirty = false;
             }
+            Err(e) => {
+                self.is_dirty = true;
+                self.set_status(format!("Save failed: {}", e));
+                return;
+            }
+        }
+
+        if !sync_errors.is_empty() {
+            self.set_status(format!("Disk save warning: {}", sync_errors.join(", ")));
+        } else if linked_count > 0 {
+            self.set_status("Synced & saved");
+        } else if !force {
+            self.set_status("Auto-saved");
         }
     }
 
@@ -300,12 +336,26 @@ impl QuickyNotesApp {
             return;
         }
 
+        // Poll for async font loading completion
+        if let Some(rx) = &self.font_loading_rx
+            && let Ok(font_defs) = rx.try_recv()
+        {
+            ctx.set_fonts(font_defs);
+            self.font_loading_rx = None;
+        }
+
+        // Poll for async file dialog completion
+        ui::drag_drop::poll_file_dialog(self);
+
         ui::drag_drop::handle_dropped_files(self, ctx);
         ui::shortcuts::handle_keyboard_shortcuts(self, ctx);
 
-        // Auto-save interval check
+        // Compute active note stats once per frame
+        self.cached_active_stats = self.active_note().map_or((0, 0, 0), |n| n.compute_stats());
+
+        // Defense-in-depth guard against zero auto_save_seconds
         if self.last_auto_save.elapsed()
-            > Duration::from_secs(self.data.settings.auto_save_seconds as u64)
+            > Duration::from_secs(self.data.settings.auto_save_seconds.max(1) as u64)
         {
             self.save_if_dirty();
             self.last_auto_save = Instant::now();
@@ -319,6 +369,22 @@ impl QuickyNotesApp {
             if theme::check_wallpaper_color_change(&mut self.last_wallpaper_colors) {
                 theme::setup_glassmorphism_theme(ctx, &self.data.settings);
                 ctx.request_repaint();
+            }
+        }
+
+        // Persist window size on resize (throttled to once per second)
+        if self.last_window_size_check.elapsed() > Duration::from_secs(1) {
+            self.last_window_size_check = Instant::now();
+            if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+                let new_w = rect.width();
+                let new_h = rect.height();
+                if (new_w - self.data.settings.window_width).abs() > 1.0
+                    || (new_h - self.data.settings.window_height).abs() > 1.0
+                {
+                    self.data.settings.window_width = new_w;
+                    self.data.settings.window_height = new_h;
+                    self.is_dirty = true;
+                }
             }
         }
 
@@ -355,7 +421,7 @@ mod tests {
             data,
             search_query: String::new(),
             search_selected_idx: 0,
-            editing_title_id: None,
+            editing_title: None,
             show_options: false,
             show_search: false,
             focus_search: false,
@@ -369,6 +435,10 @@ mod tests {
             confirm_close_id: None,
             is_closing: false,
             is_dirty: false,
+            file_dialog_rx: None,
+            font_loading_rx: None,
+            cached_active_stats: (0, 0, 0),
+            last_window_size_check: Instant::now(),
         }
     }
 

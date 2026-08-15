@@ -89,7 +89,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
     if let Some(active_id) = app.data.active_note_id.as_deref()
         && let Some(note) = app.data.notes.iter_mut().find(|n| n.id == active_id)
     {
-        let line_count = note.line_count();
+        let line_count = app.cached_active_stats.2;
         let line_font = if is_monospace {
             FontId::monospace(font_size)
         } else {
@@ -268,10 +268,6 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             app.is_dirty = true;
         }
     }
-
-    if should_focus {
-        app.focus_editor = false;
-    }
 }
 
 /// Renders the bottom status bar with clean, unboxed typography, subtle dots, and generous padding.
@@ -359,8 +355,7 @@ fn render_status_bar(app: &QuickyNotesApp, ui: &mut Ui) {
                             }
                             if ui.button("📂 Reveal Folder in File Manager").clicked() {
                                 if let Some(parent) = std::path::Path::new(path_str).parent() {
-                                    let _ =
-                                        std::process::Command::new("xdg-open").arg(parent).spawn();
+                                    crate::ui::drag_drop::safe_open_folder(parent);
                                 }
                                 ui.close();
                             }
@@ -456,8 +451,8 @@ fn render_status_bar(app: &QuickyNotesApp, ui: &mut Ui) {
                     );
 
                     // Word / Char statistics
-                    if let Some(note) = app.active_note() {
-                        let (words, chars, lines) = note.compute_stats();
+                    {
+                        let (words, chars, lines) = app.cached_active_stats;
 
                         ui.label(
                             RichText::new(format!(

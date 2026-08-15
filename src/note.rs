@@ -41,10 +41,14 @@ impl Note {
     /// Creates a new note with a validated ID and title.
     ///
     /// # Invariants
-    /// - `id` is verified non-empty.
+    /// - `id` is verified non-empty (empty IDs are replaced with timestamp-based fallbacks instead of panicking).
     /// - `title` is sanitized (trimmed, clamped in length, falling back to `DEFAULT_NOTE_TITLE` if blank).
     pub fn new(id: String, title: String) -> Self {
-        assert!(!id.trim().is_empty(), "Note ID must not be empty");
+        let id = if id.trim().is_empty() {
+            format!("note-{}", chrono::Local::now().timestamp_millis())
+        } else {
+            id
+        };
 
         let sanitized_title = Self::sanitize_title(&title);
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -144,6 +148,8 @@ impl Note {
     /// Formats updated timestamp safely for display in status and search lists.
     ///
     /// Extracts `HH:MM` from `YYYY-MM-DD HH:MM:SS` without risking UTF-8 panics.
+    /// Safety: byte slicing is safe here because `chrono::Local::now().format("%Y-%m-%d %H:%M:%S")`
+    /// produces exclusively ASCII characters. The `is_char_boundary` checks provide defense-in-depth.
     pub fn display_time(&self) -> String {
         let text = self.updated_at.trim();
         if text.len() >= 16 && text.is_char_boundary(11) && text.is_char_boundary(16) {
