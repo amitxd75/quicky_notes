@@ -256,7 +256,11 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
             let plus_btn =
                 button::icon_button(ui, "+", false, &palette, 16.0, egui::vec2(34.0, 32.0));
 
-            if plus_btn.on_hover_text("New tab (Ctrl+N)").clicked() {
+            let new_tab_tooltip = format!(
+                "New tab ({})",
+                app.shortcut_label(crate::ui::shortcuts::ShortcutAction::NewNote)
+            );
+            if plus_btn.on_hover_text(new_tab_tooltip).clicked() {
                 app.create_new_note();
             }
 
@@ -308,10 +312,11 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     egui::vec2(32.0, 30.0),
                 );
 
-                if opt_btn
-                    .on_hover_text("Settings & Preferences (Ctrl+,)")
-                    .clicked()
-                {
+                let opt_tooltip = format!(
+                    "Settings & Preferences ({})",
+                    app.shortcut_label(crate::ui::shortcuts::ShortcutAction::OpenSettings)
+                );
+                if opt_btn.on_hover_text(opt_tooltip).clicked() {
                     app.show_options = !app.show_options;
                     app.show_search = false;
                     if !app.show_options {
@@ -330,7 +335,11 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     egui::vec2(32.0, 30.0),
                 );
 
-                if search_btn.on_hover_text("Search notes (Ctrl+K)").clicked() {
+                let search_tooltip = format!(
+                    "Search notes ({})",
+                    app.shortcut_label(crate::ui::shortcuts::ShortcutAction::SearchNotes)
+                );
+                if search_btn.on_hover_text(search_tooltip).clicked() {
                     app.show_search = !app.show_search;
                     app.show_options = false;
                     if app.show_search {
@@ -354,7 +363,12 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         egui::vec2(32.0, 30.0),
                     );
 
-                    if md_btn.on_hover_text(app.preview_mode.tooltip()).clicked() {
+                    let md_shortcut =
+                        app.shortcut_label(crate::ui::shortcuts::ShortcutAction::ToggleMarkdown);
+                    if md_btn
+                        .on_hover_text(app.preview_mode.tooltip_with_shortcut(&md_shortcut))
+                        .clicked()
+                    {
                         app.preview_mode = app.preview_mode.next();
                         ctx.request_repaint();
                     }

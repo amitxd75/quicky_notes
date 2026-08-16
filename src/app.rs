@@ -4,81 +4,12 @@ use crate::note::Note;
 use crate::storage::AppData;
 use crate::theme;
 use crate::ui;
+pub use crate::ui::markdown::MarkdownViewMode;
+pub use crate::ui::options_drawer::SettingsTab;
+pub use crate::ui::toast::{Toast, ToastKind};
 use eframe::egui::{self, Color32, Ui, ViewportCommand};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-
-/// Markdown preview mode for note editing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MarkdownViewMode {
-    #[default]
-    Edit,
-    Split,
-    Preview,
-}
-
-impl MarkdownViewMode {
-    /// Returns the next view mode in the cycle: Edit -> Split -> Preview -> Edit.
-    pub fn next(self) -> Self {
-        match self {
-            Self::Edit => Self::Split,
-            Self::Split => Self::Preview,
-            Self::Preview => Self::Edit,
-        }
-    }
-
-    /// Display icon for mode switcher.
-    pub fn icon(self) -> &'static str {
-        match self {
-            Self::Edit => "📝",
-            Self::Split => "◫",
-            Self::Preview => "👁",
-        }
-    }
-
-    /// Tooltip label for mode switcher.
-    pub fn tooltip(self) -> &'static str {
-        match self {
-            Self::Edit => "Edit Mode (Ctrl+P)",
-            Self::Split => "Split Mode (Ctrl+P)",
-            Self::Preview => "Preview Mode (Ctrl+P)",
-        }
-    }
-}
-
-/// Navigation tabs in the Settings & Preferences drawer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SettingsTab {
-    #[default]
-    General,
-    Appearance,
-    Editor,
-    FilesBackup,
-    Shortcuts,
-    About,
-}
-
-impl SettingsTab {
-    pub const ALL: [Self; 6] = [
-        Self::General,
-        Self::Appearance,
-        Self::Editor,
-        Self::FilesBackup,
-        Self::Shortcuts,
-        Self::About,
-    ];
-
-    pub fn icon_and_label(self) -> (&'static str, &'static str) {
-        match self {
-            Self::General => ("⚙", "General"),
-            Self::Appearance => ("🎨", "Appearance"),
-            Self::Editor => ("📝", "Editor"),
-            Self::FilesBackup => ("📁", "Files & Backup"),
-            Self::Shortcuts => ("⌨", "Shortcuts"),
-            Self::About => ("ℹ", "About"),
-        }
-    }
-}
 
 /// Main application state for Quicky Notes.
 pub struct QuickyNotesApp {
@@ -143,6 +74,12 @@ pub struct QuickyNotesApp {
     /// Cached active note statistics (words, chars, lines), computed once per frame.
     pub cached_active_stats: (usize, usize, usize),
 
+    /// Active shortcut action currently awaiting user keypress to rebind.
+    pub recording_shortcut: Option<crate::ui::shortcuts::ShortcutAction>,
+
+    /// Active floating toast notification.
+    pub toast: Option<Toast>,
+
     /// Last timestamp for window size persistence check.
     pub last_window_size_check: Instant,
 }
@@ -174,7 +111,7 @@ impl QuickyNotesApp {
             focus_editor: true,
             preview_mode: MarkdownViewMode::Edit,
             settings_tab: SettingsTab::General,
-            status_msg: Some(("Quicky Notes ready".to_string(), Instant::now())),
+            status_msg: None,
             last_auto_save: Instant::now(),
             last_wallpaper_check: Instant::now(),
             last_wallpaper_colors: initial_colors,
@@ -184,14 +121,40 @@ impl QuickyNotesApp {
             file_dialog_rx: None,
             font_loading_rx: Some(font_rx),
             cached_active_stats: (0, 0, 0),
+            recording_shortcut: None,
+            toast: None,
             last_window_size_check: Instant::now(),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Notifications & Status
+    // -------------------------------------------------------------------------
+
+    /// Returns human-readable keybinding label for a shortcut action.
+    pub fn shortcut_label(&self, action: crate::ui::shortcuts::ShortcutAction) -> String {
+        self.data
+            .settings
+            .keybindings
+            .get(action)
+            .to_display_string()
     }
 
     /// Sets status bar notification text.
     pub fn set_status(&mut self, text: impl Into<String>) {
         self.status_msg = Some((text.into(), Instant::now()));
     }
+
+    /// Triggers an animated floating toast notification.
+    pub fn show_toast(&mut self, text: impl Into<String>, kind: ToastKind) {
+        let msg = text.into();
+        self.set_status(msg.clone());
+        self.toast = Some(Toast::new(msg, kind));
+    }
+
+    // -------------------------------------------------------------------------
+    // Note Tab Management
+    // -------------------------------------------------------------------------
 
     /// Returns immutable reference to active note.
     pub fn active_note(&self) -> Option<&Note> {
@@ -253,12 +216,16 @@ impl QuickyNotesApp {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Persistence & Synchronization
+    // -------------------------------------------------------------------------
+
     /// Explicitly forces an immediate save of all notes and settings to disk, syncing linked external files.
     ///
     /// Unlike auto-save, this always triggers a save regardless of the dirty flag.
     pub fn save_notes_to_disk(&mut self) {
         self.save_if_dirty_inner(true);
-        self.set_status("Saved to disk ✓");
+        self.show_toast("Saved to disk ✓", ToastKind::Success);
     }
 
     /// Saves notes and settings if dirty flag is set.
@@ -310,19 +277,26 @@ impl QuickyNotesApp {
             }
             Err(e) => {
                 self.is_dirty = true;
-                self.set_status(format!("Save failed: {}", e));
+                self.show_toast(format!("Save failed: {}", e), ToastKind::Error);
                 return;
             }
         }
 
         if !sync_errors.is_empty() {
-            self.set_status(format!("Disk save warning: {}", sync_errors.join(", ")));
+            self.show_toast(
+                format!("Disk save warning: {}", sync_errors.join(", ")),
+                ToastKind::Warning,
+            );
         } else if linked_count > 0 {
             self.set_status("Synced & saved");
         } else if !force {
             self.set_status("Auto-saved");
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Frame Lifecycle Loop
+    // -------------------------------------------------------------------------
 
     /// Main frame update cycle.
     fn update_app(&mut self, ctx: &egui::Context, ui: &mut Ui) {
@@ -438,6 +412,8 @@ mod tests {
             file_dialog_rx: None,
             font_loading_rx: None,
             cached_active_stats: (0, 0, 0),
+            recording_shortcut: None,
+            toast: None,
             last_window_size_check: Instant::now(),
         }
     }

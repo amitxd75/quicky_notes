@@ -9,6 +9,44 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
+/// Markdown preview mode for note editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkdownViewMode {
+    #[default]
+    Edit,
+    Split,
+    Preview,
+}
+
+impl MarkdownViewMode {
+    /// Returns the next view mode in the cycle: Edit -> Split -> Preview -> Edit.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Edit => Self::Split,
+            Self::Split => Self::Preview,
+            Self::Preview => Self::Edit,
+        }
+    }
+
+    /// Display icon for mode switcher.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::Edit => "📝",
+            Self::Split => "◫",
+            Self::Preview => "👁",
+        }
+    }
+
+    /// Tooltip label for mode switcher using dynamic shortcut string.
+    pub fn tooltip_with_shortcut(self, shortcut: &str) -> String {
+        match self {
+            Self::Edit => format!("Edit Mode ({})", shortcut),
+            Self::Split => format!("Split Mode ({})", shortcut),
+            Self::Preview => format!("Preview Mode ({})", shortcut),
+        }
+    }
+}
+
 /// Cached intermediate representation of parsed Markdown blocks.
 #[derive(Clone)]
 pub enum MarkdownBlock {

@@ -73,6 +73,9 @@ pub fn render_main_editor(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mu
 
     // Confirmation Modal for Tab Deletion
     render_close_confirmation_modal(app, ctx);
+
+    // Floating Toast Notification Overlay
+    render_floating_toast(app, ctx);
 }
 
 /// Renders the main note editing area with line numbers and preview toggling.
@@ -310,8 +313,7 @@ fn render_status_bar(app: &QuickyNotesApp, ui: &mut Ui) {
                     );
                 }
 
-                // Subtle separator
-                ui.label(
+                                ui.label(
                     RichText::new("|")
                         .font(FontId::proportional(11.0))
                         .color(Color32::from_gray(90)),
@@ -320,23 +322,32 @@ fn render_status_bar(app: &QuickyNotesApp, ui: &mut Ui) {
                 // 2. Linked File indicator or Mode
                 if let Some(note) = app.active_note() {
                     if let Some(ref path_str) = note.file_path {
-                        let display_path = crate::storage::format_display_path(path_str, 40);
-                        let path_resp = ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.label(
-                                RichText::new("🔗")
-                                    .font(FontId::proportional(11.5))
-                                    .color(Color32::WHITE),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(display_path)
+                        let is_status_active = app
+                            .status_msg
+                            .as_ref()
+                            .is_some_and(|(_, created)| created.elapsed().as_secs_f32() < 3.5);
+                        let max_path_len = if is_status_active { 22 } else { 38 };
+                        let display_path =
+                            crate::storage::format_display_path(path_str, max_path_len);
+                        let path_resp = ui
+                            .horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new("🔗")
                                         .font(FontId::proportional(11.5))
-                                        .color(palette.accent),
+                                        .color(Color32::WHITE),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(display_path)
+                                            .font(FontId::proportional(11.5))
+                                            .color(palette.accent),
+                                    )
+                                    .sense(egui::Sense::click())
+                                    .truncate(),
                                 )
-                                .sense(egui::Sense::click()),
-                            )
-                        }).inner;
+                            })
+                            .inner;
 
                         let tooltip = format!(
                             "📁 Directly linked file on disk:\n{}\n\n• Click to copy full path\n• Right-click to reveal in file manager",
@@ -416,16 +427,19 @@ fn render_status_bar(app: &QuickyNotesApp, ui: &mut Ui) {
                                         .font(FontId::proportional(11.5))
                                         .color(Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
                                 );
-                                ui.label(
-                                    RichText::new(msg)
-                                        .font(FontId::proportional(11.5))
-                                        .strong()
-                                        .color(Color32::from_rgba_unmultiplied(
-                                            palette.accent.r(),
-                                            palette.accent.g(),
-                                            palette.accent.b(),
-                                            alpha,
-                                        )),
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(msg)
+                                            .font(FontId::proportional(11.5))
+                                            .strong()
+                                            .color(Color32::from_rgba_unmultiplied(
+                                                palette.accent.r(),
+                                                palette.accent.g(),
+                                                palette.accent.b(),
+                                                alpha,
+                                            )),
+                                    )
+                                    .truncate(),
                                 );
                             });
                         }
@@ -534,17 +548,10 @@ pub fn render_close_confirmation_modal(app: &mut QuickyNotesApp, ctx: &egui::Con
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 10.0;
 
-                        let confirm_btn = ui.add(
-                            egui::Button::new(
-                                RichText::new("🗑  Close Note")
-                                    .font(FontId::proportional(12.5))
-                                    .strong()
-                                    .color(Color32::WHITE),
-                            )
-                            .fill(Color32::from_rgb(220, 38, 38))
-                            .stroke(Stroke::new(1.0, Color32::from_rgb(239, 68, 68)))
-                            .corner_radius(CornerRadius::same(7))
-                            .min_size(egui::vec2(105.0, 32.0)),
+                        let confirm_btn = crate::components::button::animated_danger_button(
+                            ui,
+                            "🗑  Close Note",
+                            egui::vec2(105.0, 32.0),
                         );
 
                         if confirm_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -553,21 +560,11 @@ pub fn render_close_confirmation_modal(app: &mut QuickyNotesApp, ctx: &egui::Con
                             ctx.request_repaint();
                         }
 
-                        let cancel_btn = ui.add(
-                            egui::Button::new(
-                                RichText::new("Cancel (Esc)")
-                                    .font(FontId::proportional(12.5))
-                                    .color(Color32::from_gray(220)),
-                            )
-                            .fill(Color32::from_rgba_unmultiplied(
-                                palette.card.r(),
-                                palette.card.g(),
-                                palette.card.b(),
-                                200,
-                            ))
-                            .stroke(Stroke::new(1.0, palette.border))
-                            .corner_radius(CornerRadius::same(7))
-                            .min_size(egui::vec2(95.0, 32.0)),
+                        let cancel_btn = crate::components::button::animated_action_button(
+                            ui,
+                            "Cancel (Esc)",
+                            &palette,
+                            egui::vec2(95.0, 32.0),
                         );
 
                         if cancel_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -613,3 +610,5 @@ pub fn render_drop_hover_overlay(ctx: &egui::Context) {
             );
         });
 }
+
+pub use crate::ui::toast::render_floating_toast;

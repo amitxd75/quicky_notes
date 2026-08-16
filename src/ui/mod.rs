@@ -7,5 +7,6 @@ pub mod markdown;
 pub mod options_drawer;
 pub mod search_drawer;
 pub mod shortcuts;
+pub mod toast;
 
 pub use crate::components::divider::horizontal_divider as draw_horizontal_divider;

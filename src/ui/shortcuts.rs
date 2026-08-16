@@ -1,20 +1,654 @@
-//! Global keyboard shortcuts and navigation handler.
+//! Global keyboard shortcuts and key event registry handler.
 
 use crate::app::QuickyNotesApp;
 use crate::ui;
 use eframe::egui::{self, ViewportCommand};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-/// Evaluates global keyboard shortcuts.
+/// Identifies all triggerable keyboard shortcut actions in Quicky Notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutAction {
+    NewNote,
+    CloseNote,
+    SaveNotes,
+    ToggleMarkdown,
+    SearchNotes,
+    OpenSettings,
+    ExportNote,
+    ToggleAlwaysOnTop,
+    IncreaseFontSize,
+    DecreaseFontSize,
+    NextTab,
+    PrevTab,
+    SwitchTab1,
+    SwitchTab2,
+    SwitchTab3,
+    SwitchTab4,
+    SwitchTab5,
+    SwitchTab6,
+    SwitchTab7,
+    SwitchTab8,
+    SwitchTab9,
+    SwitchLastTab,
+}
+
+impl ShortcutAction {
+    /// Ordered list of all shortcut actions for registry traversal and UI listing.
+    pub const ALL: &'static [Self] = &[
+        Self::NewNote,
+        Self::CloseNote,
+        Self::SaveNotes,
+        Self::ToggleMarkdown,
+        Self::SearchNotes,
+        Self::OpenSettings,
+        Self::ExportNote,
+        Self::ToggleAlwaysOnTop,
+        Self::IncreaseFontSize,
+        Self::DecreaseFontSize,
+        Self::NextTab,
+        Self::PrevTab,
+        Self::SwitchTab1,
+        Self::SwitchTab2,
+        Self::SwitchTab3,
+        Self::SwitchTab4,
+        Self::SwitchTab5,
+        Self::SwitchTab6,
+        Self::SwitchTab7,
+        Self::SwitchTab8,
+        Self::SwitchTab9,
+        Self::SwitchLastTab,
+    ];
+
+    /// Human-readable title for the shortcut action.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::NewNote => "New Note Tab",
+            Self::CloseNote => "Close Active Tab",
+            Self::SaveNotes => "Save Notes to Disk",
+            Self::ToggleMarkdown => "Toggle Markdown Preview",
+            Self::SearchNotes => "Search & Browse Notes",
+            Self::OpenSettings => "Open Settings & Preferences",
+            Self::ExportNote => "Export Active Note to File",
+            Self::ToggleAlwaysOnTop => "Toggle Always on Top",
+            Self::IncreaseFontSize => "Increase Font Size",
+            Self::DecreaseFontSize => "Decrease Font Size",
+            Self::NextTab => "Next Tab",
+            Self::PrevTab => "Previous Tab",
+            Self::SwitchTab1 => "Switch to Tab 1",
+            Self::SwitchTab2 => "Switch to Tab 2",
+            Self::SwitchTab3 => "Switch to Tab 3",
+            Self::SwitchTab4 => "Switch to Tab 4",
+            Self::SwitchTab5 => "Switch to Tab 5",
+            Self::SwitchTab6 => "Switch to Tab 6",
+            Self::SwitchTab7 => "Switch to Tab 7",
+            Self::SwitchTab8 => "Switch to Tab 8",
+            Self::SwitchTab9 => "Switch to Tab 9",
+            Self::SwitchLastTab => "Switch to Last Tab",
+        }
+    }
+
+    /// Functional category group for UI categorization.
+    pub fn category(self) -> &'static str {
+        match self {
+            Self::NextTab
+            | Self::PrevTab
+            | Self::SwitchTab1
+            | Self::SwitchTab2
+            | Self::SwitchTab3
+            | Self::SwitchTab4
+            | Self::SwitchTab5
+            | Self::SwitchTab6
+            | Self::SwitchTab7
+            | Self::SwitchTab8
+            | Self::SwitchTab9
+            | Self::SwitchLastTab => "Tabs & Navigation",
+
+            Self::NewNote | Self::CloseNote | Self::SaveNotes | Self::ExportNote => {
+                "Note Operations"
+            }
+
+            Self::ToggleMarkdown | Self::IncreaseFontSize | Self::DecreaseFontSize => {
+                "Editor & View"
+            }
+
+            Self::SearchNotes | Self::OpenSettings | Self::ToggleAlwaysOnTop => "Window & Modals",
+        }
+    }
+
+    /// Default keybinding combination for this action.
+    pub fn default_binding(self) -> KeyBinding {
+        match self {
+            Self::NewNote => KeyBinding::ctrl("N"),
+            Self::CloseNote => KeyBinding::ctrl("W"),
+            Self::SaveNotes => KeyBinding::ctrl("S"),
+            Self::ToggleMarkdown => KeyBinding::ctrl("P"),
+            Self::SearchNotes => KeyBinding::ctrl("K"),
+            Self::OpenSettings => KeyBinding::ctrl(","),
+            Self::ExportNote => KeyBinding::ctrl_shift("E"),
+            Self::ToggleAlwaysOnTop => KeyBinding::ctrl_shift("T"),
+            Self::IncreaseFontSize => KeyBinding::ctrl("="),
+            Self::DecreaseFontSize => KeyBinding::ctrl("-"),
+            Self::NextTab => KeyBinding::ctrl("Tab"),
+            Self::PrevTab => KeyBinding::ctrl_shift("Tab"),
+            Self::SwitchTab1 => KeyBinding::ctrl("1"),
+            Self::SwitchTab2 => KeyBinding::ctrl("2"),
+            Self::SwitchTab3 => KeyBinding::ctrl("3"),
+            Self::SwitchTab4 => KeyBinding::ctrl("4"),
+            Self::SwitchTab5 => KeyBinding::ctrl("5"),
+            Self::SwitchTab6 => KeyBinding::ctrl("6"),
+            Self::SwitchTab7 => KeyBinding::ctrl("7"),
+            Self::SwitchTab8 => KeyBinding::ctrl("8"),
+            Self::SwitchTab9 => KeyBinding::ctrl("9"),
+            Self::SwitchLastTab => KeyBinding::ctrl("0"),
+        }
+    }
+}
+
+/// Represents a single customizable key combination.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct KeyBinding {
+    /// String identifier for key (e.g. "N", "Tab", ",", "1", "F1", etc.)
+    pub key: String,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+}
+
+impl KeyBinding {
+    /// Creates a key combination with Ctrl modifier.
+    pub fn ctrl(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        }
+    }
+
+    /// Creates a key combination with Ctrl + Shift modifiers.
+    pub fn ctrl_shift(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            ctrl: true,
+            shift: true,
+            alt: false,
+        }
+    }
+
+    /// Creates an empty/unbound keybinding.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            key: String::new(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        }
+    }
+
+    /// Returns true if this keybinding is unassigned.
+    pub fn is_empty(&self) -> bool {
+        self.key.trim().is_empty()
+    }
+
+    /// Formats the key combination into a human-readable display string (e.g., "Ctrl + Shift + E").
+    pub fn to_display_string(&self) -> String {
+        if self.is_empty() {
+            return "Unassigned".to_string();
+        }
+
+        let mut parts = Vec::new();
+        if self.ctrl {
+            parts.push("Ctrl");
+        }
+        if self.alt {
+            parts.push("Alt");
+        }
+        if self.shift {
+            parts.push("Shift");
+        }
+
+        let key_display = match self.key.as_str() {
+            "," => ",",
+            "." => ".",
+            "=" => "=",
+            "+" => "+",
+            "-" => "-",
+            "Tab" => "Tab",
+            "Escape" => "Esc",
+            "Enter" => "Enter",
+            "Space" => "Space",
+            other => other,
+        };
+        parts.push(key_display);
+
+        parts.join(" + ")
+    }
+
+    /// Maps string key to egui::Key enum.
+    pub fn to_egui_key(&self) -> Option<egui::Key> {
+        match self.key.to_uppercase().as_str() {
+            "A" => Some(egui::Key::A),
+            "B" => Some(egui::Key::B),
+            "C" => Some(egui::Key::C),
+            "D" => Some(egui::Key::D),
+            "E" => Some(egui::Key::E),
+            "F" => Some(egui::Key::F),
+            "G" => Some(egui::Key::G),
+            "H" => Some(egui::Key::H),
+            "I" => Some(egui::Key::I),
+            "J" => Some(egui::Key::J),
+            "K" => Some(egui::Key::K),
+            "L" => Some(egui::Key::L),
+            "M" => Some(egui::Key::M),
+            "N" => Some(egui::Key::N),
+            "O" => Some(egui::Key::O),
+            "P" => Some(egui::Key::P),
+            "Q" => Some(egui::Key::Q),
+            "R" => Some(egui::Key::R),
+            "S" => Some(egui::Key::S),
+            "T" => Some(egui::Key::T),
+            "U" => Some(egui::Key::U),
+            "V" => Some(egui::Key::V),
+            "W" => Some(egui::Key::W),
+            "X" => Some(egui::Key::X),
+            "Y" => Some(egui::Key::Y),
+            "Z" => Some(egui::Key::Z),
+            "0" | "NUM0" => Some(egui::Key::Num0),
+            "1" | "NUM1" => Some(egui::Key::Num1),
+            "2" | "NUM2" => Some(egui::Key::Num2),
+            "3" | "NUM3" => Some(egui::Key::Num3),
+            "4" | "NUM4" => Some(egui::Key::Num4),
+            "5" | "NUM5" => Some(egui::Key::Num5),
+            "6" | "NUM6" => Some(egui::Key::Num6),
+            "7" | "NUM7" => Some(egui::Key::Num7),
+            "8" | "NUM8" => Some(egui::Key::Num8),
+            "9" | "NUM9" => Some(egui::Key::Num9),
+            "TAB" => Some(egui::Key::Tab),
+            "ENTER" => Some(egui::Key::Enter),
+            "ESCAPE" | "ESC" => Some(egui::Key::Escape),
+            "SPACE" => Some(egui::Key::Space),
+            "," | "COMMA" => Some(egui::Key::Comma),
+            "." | "PERIOD" => Some(egui::Key::Period),
+            "-" | "MINUS" => Some(egui::Key::Minus),
+            "=" | "EQUALS" => Some(egui::Key::Equals),
+            "+" | "PLUS" => Some(egui::Key::Plus),
+            "[" | "OPENBRACKET" => Some(egui::Key::OpenBracket),
+            "]" | "CLOSEBRACKET" => Some(egui::Key::CloseBracket),
+            ";" | "SEMICOLON" => Some(egui::Key::Semicolon),
+            ":" | "COLON" => Some(egui::Key::Colon),
+            "'" | "\"" | "QUOTE" => Some(egui::Key::Quote),
+            "/" | "SLASH" => Some(egui::Key::Slash),
+            "\\" | "BACKSLASH" => Some(egui::Key::Backslash),
+            "?" | "QUESTIONMARK" => Some(egui::Key::Questionmark),
+            "F1" => Some(egui::Key::F1),
+            "F2" => Some(egui::Key::F2),
+            "F3" => Some(egui::Key::F3),
+            "F4" => Some(egui::Key::F4),
+            "F5" => Some(egui::Key::F5),
+            "F6" => Some(egui::Key::F6),
+            "F7" => Some(egui::Key::F7),
+            "F8" => Some(egui::Key::F8),
+            "F9" => Some(egui::Key::F9),
+            "F10" => Some(egui::Key::F10),
+            "F11" => Some(egui::Key::F11),
+            "F12" => Some(egui::Key::F12),
+            _ => None,
+        }
+    }
+
+    /// Constructs a `KeyBinding` from an egui Key and Modifiers.
+    pub fn from_egui_key_and_modifiers(
+        key: egui::Key,
+        modifiers: &egui::Modifiers,
+    ) -> Option<Self> {
+        let key_str = match key {
+            egui::Key::A => "A",
+            egui::Key::B => "B",
+            egui::Key::C => "C",
+            egui::Key::D => "D",
+            egui::Key::E => "E",
+            egui::Key::F => "F",
+            egui::Key::G => "G",
+            egui::Key::H => "H",
+            egui::Key::I => "I",
+            egui::Key::J => "J",
+            egui::Key::K => "K",
+            egui::Key::L => "L",
+            egui::Key::M => "M",
+            egui::Key::N => "N",
+            egui::Key::O => "O",
+            egui::Key::P => "P",
+            egui::Key::Q => "Q",
+            egui::Key::R => "R",
+            egui::Key::S => "S",
+            egui::Key::T => "T",
+            egui::Key::U => "U",
+            egui::Key::V => "V",
+            egui::Key::W => "W",
+            egui::Key::X => "X",
+            egui::Key::Y => "Y",
+            egui::Key::Z => "Z",
+            egui::Key::Num0 => "0",
+            egui::Key::Num1 => "1",
+            egui::Key::Num2 => "2",
+            egui::Key::Num3 => "3",
+            egui::Key::Num4 => "4",
+            egui::Key::Num5 => "5",
+            egui::Key::Num6 => "6",
+            egui::Key::Num7 => "7",
+            egui::Key::Num8 => "8",
+            egui::Key::Num9 => "9",
+            egui::Key::Tab => "Tab",
+            egui::Key::Enter => "Enter",
+            egui::Key::Escape => "Escape",
+            egui::Key::Space => "Space",
+            egui::Key::Comma => ",",
+            egui::Key::Period => ".",
+            egui::Key::Minus => "-",
+            egui::Key::Equals => "=",
+            egui::Key::Plus => "+",
+            egui::Key::OpenBracket => "[",
+            egui::Key::CloseBracket => "]",
+            egui::Key::Semicolon => ";",
+            egui::Key::Colon => ":",
+            egui::Key::Quote => "'",
+            egui::Key::Slash => "/",
+            egui::Key::Backslash => "\\",
+            egui::Key::Questionmark => "?",
+            egui::Key::F1 => "F1",
+            egui::Key::F2 => "F2",
+            egui::Key::F3 => "F3",
+            egui::Key::F4 => "F4",
+            egui::Key::F5 => "F5",
+            egui::Key::F6 => "F6",
+            egui::Key::F7 => "F7",
+            egui::Key::F8 => "F8",
+            egui::Key::F9 => "F9",
+            egui::Key::F10 => "F10",
+            egui::Key::F11 => "F11",
+            egui::Key::F12 => "F12",
+            _ => return None,
+        };
+
+        Some(Self {
+            key: key_str.to_string(),
+            ctrl: modifiers.ctrl,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+        })
+    }
+
+    /// Evaluates whether the current egui input state matches this keybinding.
+    pub fn matches_input(&self, input: &egui::InputState) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+
+        if input.modifiers.ctrl != self.ctrl {
+            return false;
+        }
+        if input.modifiers.shift != self.shift {
+            return false;
+        }
+        if input.modifiers.alt != self.alt {
+            return false;
+        }
+
+        if let Some(target_key) = self.to_egui_key() {
+            if input.key_pressed(target_key) {
+                return true;
+            }
+            // For equals / plus flexibility
+            if (target_key == egui::Key::Equals || target_key == egui::Key::Plus)
+                && (input.key_pressed(egui::Key::Equals) || input.key_pressed(egui::Key::Plus))
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Registry mapping shortcut actions to their configured keybindings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyBindings {
+    #[serde(default = "default_keybindings_map")]
+    pub bindings: HashMap<ShortcutAction, KeyBinding>,
+}
+
+fn default_keybindings_map() -> HashMap<ShortcutAction, KeyBinding> {
+    let mut map = HashMap::new();
+    for &action in ShortcutAction::ALL {
+        map.insert(action, action.default_binding());
+    }
+    map
+}
+
+impl Default for KeyBindings {
+    fn default() -> Self {
+        Self {
+            bindings: default_keybindings_map(),
+        }
+    }
+}
+
+impl KeyBindings {
+    /// Retrieves the binding for an action, falling back to its default if unmapped.
+    pub fn get(&self, action: ShortcutAction) -> KeyBinding {
+        self.bindings
+            .get(&action)
+            .cloned()
+            .unwrap_or_else(|| action.default_binding())
+    }
+
+    /// Rebinds a shortcut action to a new key combination.
+    pub fn set(&mut self, action: ShortcutAction, binding: KeyBinding) {
+        self.bindings.insert(action, binding);
+    }
+
+    /// Resets a specific shortcut action to its factory default.
+    pub fn reset_action(&mut self, action: ShortcutAction) {
+        self.bindings.insert(action, action.default_binding());
+    }
+
+    /// Resets all shortcut actions to factory defaults.
+    pub fn reset_all(&mut self) {
+        self.bindings = default_keybindings_map();
+    }
+
+    /// Ensures every defined action exists in the map (e.g. after loading from older settings).
+    pub fn ensure_all_actions_present(&mut self) {
+        for &action in ShortcutAction::ALL {
+            self.bindings
+                .entry(action)
+                .or_insert_with(|| action.default_binding());
+        }
+    }
+
+    /// Finds if any other action shares the exact same keybinding.
+    pub fn find_conflict(&self, action: ShortcutAction) -> Option<ShortcutAction> {
+        let binding = self.get(action);
+        if binding.is_empty() {
+            return None;
+        }
+        ShortcutAction::ALL
+            .iter()
+            .copied()
+            .find(|&other_action| other_action != action && self.get(other_action) == binding)
+    }
+}
+
+/// Evaluates global keyboard shortcuts and handles interactive shortcut recording.
 pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) {
-    let ctrl_shift_tab = ctx.input_mut(|i| {
-        i.consume_key(
-            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
-            egui::Key::Tab,
-        )
-    });
-    let ctrl_tab = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));
+    // 1. Handle interactive shortcut recording mode in settings
+    if let Some(recording_action) = app.recording_shortcut {
+        let captured = ctx.input(|i| {
+            // Cancel on Escape
+            if i.key_pressed(egui::Key::Escape) && !i.modifiers.ctrl && !i.modifiers.alt {
+                return Some(None);
+            }
 
-    if (ctrl_tab || ctrl_shift_tab) && !app.data.notes.is_empty() {
+            // Find any non-modifier key pressed
+            for &key in &[
+                egui::Key::A,
+                egui::Key::B,
+                egui::Key::C,
+                egui::Key::D,
+                egui::Key::E,
+                egui::Key::F,
+                egui::Key::G,
+                egui::Key::H,
+                egui::Key::I,
+                egui::Key::J,
+                egui::Key::K,
+                egui::Key::L,
+                egui::Key::M,
+                egui::Key::N,
+                egui::Key::O,
+                egui::Key::P,
+                egui::Key::Q,
+                egui::Key::R,
+                egui::Key::S,
+                egui::Key::T,
+                egui::Key::U,
+                egui::Key::V,
+                egui::Key::W,
+                egui::Key::X,
+                egui::Key::Y,
+                egui::Key::Z,
+                egui::Key::Num0,
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+                egui::Key::Num7,
+                egui::Key::Num8,
+                egui::Key::Num9,
+                egui::Key::Tab,
+                egui::Key::Enter,
+                egui::Key::Space,
+                egui::Key::Comma,
+                egui::Key::Period,
+                egui::Key::Minus,
+                egui::Key::Equals,
+                egui::Key::Plus,
+                egui::Key::OpenBracket,
+                egui::Key::CloseBracket,
+                egui::Key::Semicolon,
+                egui::Key::Colon,
+                egui::Key::Quote,
+                egui::Key::Slash,
+                egui::Key::Backslash,
+                egui::Key::Questionmark,
+                egui::Key::F1,
+                egui::Key::F2,
+                egui::Key::F3,
+                egui::Key::F4,
+                egui::Key::F5,
+                egui::Key::F6,
+                egui::Key::F7,
+                egui::Key::F8,
+                egui::Key::F9,
+                egui::Key::F10,
+                egui::Key::F11,
+                egui::Key::F12,
+            ] {
+                if i.key_pressed(key)
+                    && let Some(binding) =
+                        KeyBinding::from_egui_key_and_modifiers(key, &i.modifiers)
+                {
+                    return Some(Some(binding));
+                }
+            }
+            None
+        });
+
+        if let Some(result) = captured {
+            if let Some(new_binding) = result {
+                app.data
+                    .settings
+                    .keybindings
+                    .set(recording_action, new_binding);
+                let display = app
+                    .data
+                    .settings
+                    .keybindings
+                    .get(recording_action)
+                    .to_display_string();
+                app.show_toast(
+                    format!("{}: {}", recording_action.title(), display),
+                    crate::app::ToastKind::Success,
+                );
+            }
+            app.recording_shortcut = None;
+            ctx.request_repaint();
+            return;
+        }
+
+        // When recording, consume other key inputs so they don't execute actions
+        return;
+    }
+
+    // 2. Tab Navigation (Next / Prev Tab) with key consumption
+    let next_tab_binding = app.data.settings.keybindings.get(ShortcutAction::NextTab);
+    let prev_tab_binding = app.data.settings.keybindings.get(ShortcutAction::PrevTab);
+
+    let mut trigger_next_tab = false;
+    let mut trigger_prev_tab = false;
+
+    // Check if next/prev tab uses Tab key so we consume it
+    if let Some(egui::Key::Tab) = next_tab_binding.to_egui_key() {
+        let mut modifiers = egui::Modifiers::NONE;
+        if next_tab_binding.ctrl {
+            modifiers |= egui::Modifiers::CTRL;
+        }
+        if next_tab_binding.shift {
+            modifiers |= egui::Modifiers::SHIFT;
+        }
+        if next_tab_binding.alt {
+            modifiers |= egui::Modifiers::ALT;
+        }
+        if ctx.input_mut(|i| i.consume_key(modifiers, egui::Key::Tab)) {
+            trigger_next_tab = true;
+        }
+    }
+
+    if let Some(egui::Key::Tab) = prev_tab_binding.to_egui_key() {
+        let mut modifiers = egui::Modifiers::NONE;
+        if prev_tab_binding.ctrl {
+            modifiers |= egui::Modifiers::CTRL;
+        }
+        if prev_tab_binding.shift {
+            modifiers |= egui::Modifiers::SHIFT;
+        }
+        if prev_tab_binding.alt {
+            modifiers |= egui::Modifiers::ALT;
+        }
+        if ctx.input_mut(|i| i.consume_key(modifiers, egui::Key::Tab)) {
+            trigger_prev_tab = true;
+        }
+    }
+
+    if !trigger_next_tab && !trigger_prev_tab {
+        ctx.input(|i| {
+            if next_tab_binding.matches_input(i) {
+                trigger_next_tab = true;
+            } else if prev_tab_binding.matches_input(i) {
+                trigger_prev_tab = true;
+            }
+        });
+    }
+
+    if (trigger_next_tab || trigger_prev_tab) && !app.data.notes.is_empty() {
         let current_idx = app
             .data
             .notes
@@ -22,7 +656,7 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             .position(|n| Some(n.id.as_str()) == app.data.active_note_id.as_deref())
             .unwrap_or(0);
 
-        let next_idx = if ctrl_shift_tab {
+        let next_idx = if trigger_prev_tab {
             if current_idx == 0 {
                 app.data.notes.len() - 1
             } else {
@@ -34,122 +668,133 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
 
         app.data.active_note_id = Some(app.data.notes[next_idx].id.clone());
         app.focus_editor = true;
+        ctx.request_repaint();
     }
 
+    // 3. Evaluate all other registered global shortcuts
+    let kb = &app.data.settings.keybindings;
+
+    let trigger_new_note = ctx.input(|i| kb.get(ShortcutAction::NewNote).matches_input(i));
+    let trigger_close_note = ctx.input(|i| kb.get(ShortcutAction::CloseNote).matches_input(i));
+    let trigger_save = ctx.input(|i| kb.get(ShortcutAction::SaveNotes).matches_input(i));
+    let trigger_markdown = ctx.input(|i| kb.get(ShortcutAction::ToggleMarkdown).matches_input(i));
+    let trigger_search = ctx.input(|i| kb.get(ShortcutAction::SearchNotes).matches_input(i));
+    let trigger_settings = ctx.input(|i| kb.get(ShortcutAction::OpenSettings).matches_input(i));
+    let trigger_export = ctx.input(|i| kb.get(ShortcutAction::ExportNote).matches_input(i));
+    let trigger_always_on_top =
+        ctx.input(|i| kb.get(ShortcutAction::ToggleAlwaysOnTop).matches_input(i));
+    let trigger_font_inc = ctx.input(|i| kb.get(ShortcutAction::IncreaseFontSize).matches_input(i));
+    let trigger_font_dec = ctx.input(|i| kb.get(ShortcutAction::DecreaseFontSize).matches_input(i));
+
+    // Direct tab switching 1..9 & LastTab
+    let tab_actions = [
+        (ShortcutAction::SwitchTab1, 0),
+        (ShortcutAction::SwitchTab2, 1),
+        (ShortcutAction::SwitchTab3, 2),
+        (ShortcutAction::SwitchTab4, 3),
+        (ShortcutAction::SwitchTab5, 4),
+        (ShortcutAction::SwitchTab6, 5),
+        (ShortcutAction::SwitchTab7, 6),
+        (ShortcutAction::SwitchTab8, 7),
+        (ShortcutAction::SwitchTab9, 8),
+    ];
+
+    for (act, idx) in tab_actions {
+        if ctx.input(|i| kb.get(act).matches_input(i))
+            && let Some(note) = app.data.notes.get(idx)
+        {
+            app.data.active_note_id = Some(note.id.clone());
+            app.focus_editor = true;
+            ctx.request_repaint();
+        }
+    }
+
+    if ctx.input(|i| kb.get(ShortcutAction::SwitchLastTab).matches_input(i))
+        && let Some(note) = app.data.notes.last()
+    {
+        app.data.active_note_id = Some(note.id.clone());
+        app.focus_editor = true;
+        ctx.request_repaint();
+    }
+
+    if trigger_new_note {
+        app.create_new_note();
+    }
+
+    if trigger_close_note && let Some(id) = app.data.active_note_id.clone() {
+        app.prompt_close_note(&id);
+    }
+
+    if trigger_save {
+        app.save_notes_to_disk();
+    }
+
+    if trigger_markdown {
+        if app.active_note().is_some_and(|n| n.is_markdown()) {
+            app.preview_mode = app.preview_mode.next();
+            app.set_status(format!("Markdown: {:?}", app.preview_mode));
+        } else {
+            app.set_status("Markdown preview only available for .md files");
+        }
+    }
+
+    if trigger_search {
+        app.show_search = !app.show_search;
+        app.show_options = false;
+        if app.show_search {
+            app.focus_search = true;
+            app.search_selected_idx = 0;
+        } else {
+            app.focus_editor = true;
+        }
+        ctx.request_repaint();
+    }
+
+    if trigger_settings {
+        app.show_options = !app.show_options;
+        app.show_search = false;
+        if !app.show_options {
+            app.focus_editor = true;
+        }
+        ctx.request_repaint();
+    }
+
+    if trigger_export {
+        ui::drag_drop::export_active_note(app);
+    }
+
+    if trigger_always_on_top {
+        app.data.settings.always_on_top = !app.data.settings.always_on_top;
+        let level = if app.data.settings.always_on_top {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        };
+        ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
+        app.is_dirty = true;
+        ctx.request_repaint();
+    }
+
+    if trigger_font_inc {
+        app.data.settings.font_size = (app.data.settings.font_size + 1.0).min(36.0);
+        app.data.settings.validate_and_clamp();
+        app.is_dirty = true;
+        let _ = app.data.save();
+        app.set_status(format!("Font size: {:.0}pt", app.data.settings.font_size));
+        ctx.request_repaint();
+    }
+
+    if trigger_font_dec {
+        app.data.settings.font_size = (app.data.settings.font_size - 1.0).max(8.0);
+        app.data.settings.validate_and_clamp();
+        app.is_dirty = true;
+        let _ = app.data.save();
+        app.set_status(format!("Font size: {:.0}pt", app.data.settings.font_size));
+        ctx.request_repaint();
+    }
+
+    // 4. Modal and drawer specific key handling
     ctx.input(|i| {
-        // Ctrl + N: New note tab
-        if i.modifiers.ctrl && i.key_pressed(egui::Key::N) {
-            app.create_new_note();
-        }
-
-        // Ctrl + W: Close active note tab
-        if i.modifiers.ctrl
-            && i.key_pressed(egui::Key::W)
-            && let Some(id) = app.data.active_note_id.clone()
-        {
-            app.prompt_close_note(&id);
-        }
-
-        // Ctrl + S: Save to disk
-        if i.modifiers.ctrl && i.key_pressed(egui::Key::S) {
-            app.save_notes_to_disk();
-        }
-
-        // Ctrl + P: Toggle/cycle Markdown preview mode (Edit -> Split -> Preview for .md files)
-        if i.modifiers.ctrl && i.key_pressed(egui::Key::P) {
-            if app.active_note().is_some_and(|n| n.is_markdown()) {
-                app.preview_mode = app.preview_mode.next();
-                app.set_status(format!("Markdown: {:?}", app.preview_mode));
-            } else {
-                app.set_status("Markdown preview only available for .md files");
-            }
-        }
-
-        // Ctrl + K: Search notes modal
-        if i.modifiers.ctrl && i.key_pressed(egui::Key::K) {
-            app.show_search = !app.show_search;
-            app.show_options = false;
-            if app.show_search {
-                app.focus_search = true;
-            } else {
-                app.focus_editor = true;
-            }
-        }
-
-        // Ctrl + ,: Options modal
-        if i.modifiers.ctrl && i.key_pressed(egui::Key::Comma) {
-            app.show_options = !app.show_options;
-            app.show_search = false;
-            if !app.show_options {
-                app.focus_editor = true;
-            }
-        }
-
-        // Ctrl + Shift + E: Export note
-        if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::E) {
-            ui::drag_drop::export_active_note(app);
-        }
-
-        // Ctrl + Shift + T: Toggle Always on Top
-        if i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::T) {
-            app.data.settings.always_on_top = !app.data.settings.always_on_top;
-            let level = if app.data.settings.always_on_top {
-                egui::WindowLevel::AlwaysOnTop
-            } else {
-                egui::WindowLevel::Normal
-            };
-            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
-            app.is_dirty = true;
-        }
-
-        // Ctrl + + / Ctrl + =: Increase font size
-        if i.modifiers.ctrl && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus))
-        {
-            app.data.settings.font_size = (app.data.settings.font_size + 1.0).min(36.0);
-            app.data.settings.validate_and_clamp();
-            app.is_dirty = true;
-            let _ = app.data.save();
-            app.set_status(format!("Font size: {:.0}pt", app.data.settings.font_size));
-        }
-
-        // Ctrl + -: Decrease font size
-        if i.modifiers.ctrl && i.key_pressed(egui::Key::Minus) {
-            app.data.settings.font_size = (app.data.settings.font_size - 1.0).max(8.0);
-            app.data.settings.validate_and_clamp();
-            app.is_dirty = true;
-            let _ = app.data.save();
-            app.set_status(format!("Font size: {:.0}pt", app.data.settings.font_size));
-        }
-
-        // Ctrl + 1..=9 / Ctrl + 0: Switch to tab by index
-        if i.modifiers.ctrl {
-            let num_keys = [
-                (egui::Key::Num1, 0),
-                (egui::Key::Num2, 1),
-                (egui::Key::Num3, 2),
-                (egui::Key::Num4, 3),
-                (egui::Key::Num5, 4),
-                (egui::Key::Num6, 5),
-                (egui::Key::Num7, 6),
-                (egui::Key::Num8, 7),
-                (egui::Key::Num9, 8),
-            ];
-            for (key, idx) in num_keys {
-                if i.key_pressed(key)
-                    && let Some(note) = app.data.notes.get(idx)
-                {
-                    app.data.active_note_id = Some(note.id.clone());
-                    app.focus_editor = true;
-                }
-            }
-            if i.key_pressed(egui::Key::Num0)
-                && let Some(note) = app.data.notes.last()
-            {
-                app.data.active_note_id = Some(note.id.clone());
-                app.focus_editor = true;
-            }
-        }
-
         // ArrowUp, ArrowDown, Enter inside search drawer
         if app.show_search && !app.data.notes.is_empty() {
             let query = app.search_query.trim().to_lowercase();
@@ -206,4 +851,94 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shortcut_default_bindings() {
+        let kb = KeyBindings::default();
+        assert_eq!(
+            kb.get(ShortcutAction::NewNote),
+            KeyBinding {
+                key: "N".to_string(),
+                ctrl: true,
+                shift: false,
+                alt: false,
+            }
+        );
+        assert_eq!(
+            kb.get(ShortcutAction::ExportNote),
+            KeyBinding {
+                key: "E".to_string(),
+                ctrl: true,
+                shift: true,
+                alt: false,
+            }
+        );
+        assert_eq!(
+            kb.get(ShortcutAction::OpenSettings),
+            KeyBinding {
+                key: ",".to_string(),
+                ctrl: true,
+                shift: false,
+                alt: false,
+            }
+        );
+    }
+
+    #[test]
+    fn test_keybinding_display_formatting() {
+        let binding = KeyBinding::ctrl("N");
+        assert_eq!(binding.to_display_string(), "Ctrl + N");
+
+        let shift_binding = KeyBinding::ctrl_shift("E");
+        assert_eq!(shift_binding.to_display_string(), "Ctrl + Shift + E");
+
+        let empty = KeyBinding::empty();
+        assert_eq!(empty.to_display_string(), "Unassigned");
+    }
+
+    #[test]
+    fn test_keybindings_rebind_and_reset() {
+        let mut kb = KeyBindings::default();
+        let custom = KeyBinding {
+            key: "M".to_string(),
+            ctrl: true,
+            shift: true,
+            alt: false,
+        };
+        kb.set(ShortcutAction::NewNote, custom.clone());
+        assert_eq!(kb.get(ShortcutAction::NewNote), custom);
+
+        kb.reset_action(ShortcutAction::NewNote);
+        assert_eq!(
+            kb.get(ShortcutAction::NewNote),
+            ShortcutAction::NewNote.default_binding()
+        );
+    }
+
+    #[test]
+    fn test_keybinding_serialization_roundtrip() {
+        let kb = KeyBindings::default();
+        let json = serde_json::to_string(&kb).expect("Serialization failed");
+        let deserialized: KeyBindings =
+            serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(kb, deserialized);
+    }
+
+    #[test]
+    fn test_keybinding_conflict_detection() {
+        let mut kb = KeyBindings::default();
+        assert_eq!(kb.find_conflict(ShortcutAction::NewNote), None);
+
+        // Assign same binding as NewNote to CloseNote
+        kb.set(ShortcutAction::CloseNote, KeyBinding::ctrl("N"));
+        assert_eq!(
+            kb.find_conflict(ShortcutAction::NewNote),
+            Some(ShortcutAction::CloseNote)
+        );
+    }
 }

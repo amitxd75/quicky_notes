@@ -1,10 +1,44 @@
 //! Settings & Preferences view matching image.png design mockup.
 
-use crate::app::{QuickyNotesApp, SettingsTab};
+use crate::app::QuickyNotesApp;
 use crate::components::{button, card, slider, toggle};
 use crate::settings::WindowSizePreset;
 use crate::theme;
 use eframe::egui::{self, Color32, CornerRadius, FontId, RichText, Stroke, Ui, ViewportCommand};
+
+/// Navigation tabs in the Settings & Preferences drawer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    Appearance,
+    Editor,
+    FilesBackup,
+    Shortcuts,
+    About,
+}
+
+impl SettingsTab {
+    pub const ALL: [Self; 6] = [
+        Self::General,
+        Self::Appearance,
+        Self::Editor,
+        Self::FilesBackup,
+        Self::Shortcuts,
+        Self::About,
+    ];
+
+    pub fn icon_and_label(self) -> (&'static str, &'static str) {
+        match self {
+            Self::General => ("⚙", "General"),
+            Self::Appearance => ("🎨", "Appearance"),
+            Self::Editor => ("📝", "Editor"),
+            Self::FilesBackup => ("📁", "Files & Backup"),
+            Self::Shortcuts => ("⌨", "Shortcuts"),
+            Self::About => ("ℹ", "About"),
+        }
+    }
+}
 
 /// Renders the Settings & Preferences drawer matching image.png.
 pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
@@ -108,10 +142,10 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                                     render_quick_actions_card(app, ui, &palette);
                                 }
                                 SettingsTab::Shortcuts => {
-                                    render_shortcuts_card(ui, &palette);
+                                    render_shortcuts_card(app, ctx, ui, &palette);
                                 }
                                 SettingsTab::About => {
-                                    render_about_card(ui, &palette);
+                                    render_about_card(app, ctx, ui, &palette);
                                 }
                             }
                         });
@@ -596,16 +630,11 @@ fn render_editor_behavior_card(
 /// Renders the Quick Actions export button card.
 fn render_quick_actions_card(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &theme::Palette) {
     card::settings_card(ui, "QUICK ACTIONS", palette, |ui| {
-        let export_btn = ui.add(
-            egui::Button::new(
-                RichText::new("📤  Export Current Note to File")
-                    .font(FontId::proportional(12.5))
-                    .color(Color32::WHITE),
-            )
-            .fill(theme::Palette::with_alpha(palette.card, 210))
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .corner_radius(CornerRadius::same(6))
-            .min_size(egui::vec2(ui.available_width(), 32.0)),
+        let export_btn = button::animated_action_button(
+            ui,
+            "📤  Export Current Note to File",
+            palette,
+            egui::vec2(ui.available_width(), 32.0),
         );
 
         if export_btn.clicked() {
@@ -624,27 +653,20 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
                 .color(Color32::from_gray(190)),
         );
 
-        ui.add_space(4.0);
+        ui.add_space(6.0);
 
-        ui.horizontal(|ui| {
-            let open_folder_btn = ui.add(
-                egui::Button::new(
-                    RichText::new("📂  Open Data Folder in File Manager")
-                        .font(FontId::proportional(11.5))
-                        .color(Color32::WHITE),
-                )
-                .fill(theme::Palette::with_alpha(palette.card, 210))
-                .stroke(Stroke::new(1.0_f32, palette.border))
-                .corner_radius(CornerRadius::same(6))
-                .min_size(egui::vec2(0.0, 28.0)),
-            );
+        let open_folder_btn = button::animated_action_button(
+            ui,
+            "📂 Open Data Folder in File Manager",
+            palette,
+            egui::vec2(ui.available_width(), 32.0),
+        );
 
-            if open_folder_btn.clicked()
-                && let Some(parent) = path.parent()
-            {
-                crate::ui::drag_drop::safe_open_folder(parent);
-            }
-        });
+        if open_folder_btn.clicked()
+            && let Some(parent) = path.parent()
+        {
+            crate::ui::drag_drop::safe_open_folder(parent);
+        }
 
         ui.add_space(4.0);
 
@@ -656,43 +678,255 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
     });
 }
 
-/// Renders the Keyboard Shortcuts reference card matching image.png.
-fn render_shortcuts_card(ui: &mut Ui, palette: &theme::Palette) {
-    card::settings_card(ui, "KEYBOARD SHORTCUTS", palette, |ui| {
-        let help_items = [
-            ("Ctrl + N", "New note tab"),
-            ("Ctrl + W", "Close active tab"),
-            ("Ctrl + S", "Manual save to disk"),
-            ("Ctrl + 1..9 / 0", "Switch to tab index"),
-            ("Ctrl + K", "Search & browse notes"),
-            ("Ctrl + ,", "Open settings"),
-            ("Ctrl + P", "Toggle Markdown preview (.md files)"),
-            ("Ctrl + Shift + E", "Export current note"),
-            ("Ctrl + Tab", "Next tab"),
-            ("Ctrl + Shift + Tab", "Previous tab"),
-        ];
+/// Renders interactive keyboard shortcut customizer and registry.
+fn render_shortcuts_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    use crate::ui::shortcuts::ShortcutAction;
 
-        for (k, d) in help_items {
-            ui.horizontal(|ui| {
+    let mut action_to_reset = None;
+    let mut action_to_record = None;
+    let mut reset_all_triggered = false;
+
+    // Header banner with instructions and global reset button
+    card::settings_card(ui, "KEYBOARD SHORTCUTS MANAGER", palette, |ui| {
+        let avail_w = ui.available_width();
+        let is_compact = avail_w < 400.0;
+
+        if is_compact {
+            ui.vertical(|ui| {
                 ui.label(
-                    RichText::new(k)
-                        .font(FontId::monospace(11.0))
-                        .color(palette.accent),
+                    RichText::new("Click any key combination badge below to reassign it.")
+                        .font(FontId::proportional(12.0))
+                        .color(Color32::from_gray(210)),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new("Press Esc while recording to cancel rebinding.")
+                        .font(FontId::proportional(11.0))
+                        .color(Color32::from_gray(160)),
+                );
+                ui.add_space(6.0);
+                let reset_btn = button::animated_action_button(
+                    ui,
+                    "↺ Reset All to Defaults",
+                    palette,
+                    egui::vec2(ui.available_width(), 28.0),
+                );
+                if reset_btn
+                    .on_hover_text("Restore all default keyboard shortcuts")
+                    .clicked()
+                {
+                    reset_all_triggered = true;
+                }
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(d)
-                            .font(FontId::proportional(11.5))
-                            .color(Color32::from_gray(180)),
+                        RichText::new("Click any key combination badge below to reassign it.")
+                            .font(FontId::proportional(12.0))
+                            .color(Color32::from_gray(210)),
                     );
+                    ui.label(
+                        RichText::new("Press Esc while recording to cancel rebinding.")
+                            .font(FontId::proportional(11.0))
+                            .color(Color32::from_gray(160)),
+                    );
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let reset_btn = button::animated_action_button(
+                        ui,
+                        "↺ Reset All to Defaults",
+                        palette,
+                        egui::vec2(150.0, 26.0),
+                    );
+                    if reset_btn
+                        .on_hover_text("Restore all default keyboard shortcuts")
+                        .clicked()
+                    {
+                        reset_all_triggered = true;
+                    }
                 });
             });
         }
+
+        if let Some(recording_action) = app.recording_shortcut {
+            ui.add_space(8.0);
+            egui::Frame::NONE
+                .fill(theme::Palette::with_alpha(palette.accent, 40))
+                .stroke(Stroke::new(1.2, palette.accent))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "⌨ Listening for shortcut: {}...",
+                                recording_action.title()
+                            ))
+                            .font(FontId::proportional(12.0))
+                            .strong()
+                            .color(Color32::WHITE),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .button(
+                                    RichText::new("Cancel (Esc)")
+                                        .font(FontId::proportional(11.0))
+                                        .color(Color32::from_gray(200)),
+                                )
+                                .clicked()
+                            {
+                                app.recording_shortcut = None;
+                                ctx.request_repaint();
+                            }
+                        });
+                    });
+                });
+        }
     });
+
+    let categories = [
+        "Tabs & Navigation",
+        "Note Operations",
+        "Editor & View",
+        "Window & Modals",
+    ];
+
+    for cat in categories {
+        let cat_actions: Vec<ShortcutAction> = ShortcutAction::ALL
+            .iter()
+            .copied()
+            .filter(|a| a.category() == cat)
+            .collect();
+
+        if cat_actions.is_empty() {
+            continue;
+        }
+
+        let header = cat.to_uppercase();
+        card::settings_card(ui, &header, palette, |ui| {
+            for action in cat_actions {
+                let current_binding = app.data.settings.keybindings.get(action);
+                let default_binding = action.default_binding();
+                let is_modified = current_binding != default_binding;
+                let is_recording = app.recording_shortcut == Some(action);
+                let conflict = app.data.settings.keybindings.find_conflict(action);
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+
+                    let right_width = if is_modified && !is_recording {
+                        110.0 + 26.0 + 8.0
+                    } else {
+                        110.0 + 8.0
+                    };
+                    let left_width = (ui.available_width() - right_width).max(60.0);
+
+                    // Left side: Action title & optional conflict badge
+                    ui.allocate_ui(egui::vec2(left_width, 24.0), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new(action.title())
+                                    .font(FontId::proportional(12.5))
+                                    .color(Color32::WHITE),
+                            );
+
+                            if let Some(other) = conflict {
+                                ui.label(
+                                    RichText::new(format!("⚠️ Conflict: {}", other.title()))
+                                        .font(FontId::proportional(10.5))
+                                        .color(Color32::from_rgb(251, 146, 60)),
+                                );
+                            }
+                        });
+                    });
+
+                    // Right side: Reset button + Shortcut Badge
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Keybinding click-to-rebind badge button
+                        let bind_btn = button::animated_shortcut_badge(
+                            ui,
+                            &current_binding.to_display_string(),
+                            is_recording,
+                            is_modified,
+                            palette,
+                            egui::vec2(110.0, 24.0),
+                        );
+
+                        if bind_btn
+                            .on_hover_text(if is_recording {
+                                "Press desired key combination or Esc to cancel"
+                            } else {
+                                "Click to reassign this shortcut"
+                            })
+                            .clicked()
+                        {
+                            if is_recording {
+                                action_to_record = Some(None);
+                            } else {
+                                action_to_record = Some(Some(action));
+                            }
+                        }
+
+                        // Revert single modified shortcut
+                        if is_modified && !is_recording {
+                            let revert_btn = button::animated_revert_button(ui, palette);
+                            let tooltip = format!(
+                                "Reset to default ({})",
+                                default_binding.to_display_string()
+                            );
+                            if revert_btn.on_hover_text(tooltip).clicked() {
+                                action_to_reset = Some(action);
+                            }
+                        }
+                    });
+                });
+
+                ui.add_space(2.0);
+            }
+        });
+    }
+
+    if reset_all_triggered {
+        app.data.settings.keybindings.reset_all();
+        app.is_dirty = true;
+        let _ = app.data.save();
+        app.show_toast(
+            "All shortcuts reset to factory defaults",
+            crate::app::ToastKind::Success,
+        );
+        ctx.request_repaint();
+    }
+
+    if let Some(action) = action_to_reset {
+        app.data.settings.keybindings.reset_action(action);
+        app.is_dirty = true;
+        let _ = app.data.save();
+        app.show_toast(
+            format!("Reset {} to default", action.title()),
+            crate::app::ToastKind::Info,
+        );
+        ctx.request_repaint();
+    }
+
+    if let Some(record_opt) = action_to_record {
+        app.recording_shortcut = record_opt;
+        ctx.request_repaint();
+    }
 }
 
-/// Renders the About This App card with developer text, version, and links.
-fn render_about_card(ui: &mut Ui, palette: &theme::Palette) {
+/// Renders the About This App card and Factory Reset control.
+fn render_about_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
     card::settings_card(ui, "ABOUT THIS APP", palette, |ui| {
         ui.label(
             RichText::new(
@@ -709,17 +943,8 @@ fn render_about_card(ui: &mut Ui, palette: &theme::Palette) {
         );
 
         ui.horizontal(|ui| {
-            let gh_btn = ui.add(
-                egui::Button::new(
-                    RichText::new("GitHub ↗")
-                        .font(FontId::proportional(12.0))
-                        .color(Color32::WHITE),
-                )
-                .fill(theme::Palette::with_alpha(palette.card, 200))
-                .stroke(Stroke::new(1.0_f32, palette.border))
-                .corner_radius(CornerRadius::same(6))
-                .min_size(egui::vec2(120.0, 30.0)),
-            );
+            let gh_btn =
+                button::animated_action_button(ui, "GitHub ↗", palette, egui::vec2(120.0, 30.0));
             if gh_btn
                 .on_hover_text("https://github.com/amitxd75/quicky_notes")
                 .clicked()
@@ -729,6 +954,47 @@ fn render_about_card(ui: &mut Ui, palette: &theme::Palette) {
                 ));
             }
         });
+    });
+
+    // Reset All Settings to Default Section
+    card::settings_card(ui, "FACTORY RESET", palette, |ui| {
+        ui.label(
+            RichText::new(
+                "Restore all appearance, theme colors, editor preferences, typography, window presets, and keybindings back to factory default values.",
+            )
+            .font(FontId::proportional(11.5))
+            .color(Color32::from_gray(190)),
+        );
+
+        ui.add_space(8.0);
+
+        let reset_all_btn = button::animated_danger_button(
+            ui,
+            "↺  Reset All Settings to Default",
+            egui::vec2(ui.available_width(), 32.0),
+        );
+
+        if reset_all_btn
+            .on_hover_text("Reset all settings and shortcuts to factory defaults")
+            .clicked()
+        {
+            app.data.settings = crate::settings::AppSettings::default();
+            app.data.settings.validate_and_clamp();
+            theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+            let level = if app.data.settings.always_on_top {
+                egui::WindowLevel::AlwaysOnTop
+            } else {
+                egui::WindowLevel::Normal
+            };
+            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
+            app.is_dirty = true;
+            let _ = app.data.save();
+            app.show_toast(
+                "All settings & shortcuts reset to factory defaults",
+                crate::app::ToastKind::Success,
+            );
+            ctx.request_repaint();
+        }
     });
 }
 

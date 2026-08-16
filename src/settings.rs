@@ -155,6 +155,10 @@ pub struct AppSettings {
     /// Default file extension for new notes (.txt or .md).
     #[serde(default = "default_extension")]
     pub default_extension: String,
+
+    /// User-customizable keyboard shortcut keybindings map.
+    #[serde(default)]
+    pub keybindings: crate::ui::shortcuts::KeyBindings,
 }
 
 const fn default_true() -> bool {
@@ -194,6 +198,7 @@ impl Default for AppSettings {
             trim_trailing_whitespace: true,
             corner_radius: 14.0,
             default_extension: ".txt".to_string(),
+            keybindings: crate::ui::shortcuts::KeyBindings::default(),
         }
     }
 }
@@ -201,6 +206,8 @@ impl Default for AppSettings {
 impl AppSettings {
     /// Validates all setting invariants and clamps values to safe bounds.
     pub fn validate_and_clamp(&mut self) {
+        self.keybindings.ensure_all_actions_present();
+
         if self.opacity.is_nan() {
             self.opacity = 0.85;
         } else {
@@ -297,5 +304,26 @@ mod tests {
         max_settings.validate_and_clamp();
         assert_eq!(max_settings.window_width, MAX_WINDOW_WIDTH);
         assert_eq!(max_settings.window_height, MAX_WINDOW_HEIGHT);
+    }
+
+    #[test]
+    fn test_settings_keybindings_backward_compatibility() {
+        // Minimal JSON without keybindings field
+        let json = r#"{"opacity": 0.9, "font_size": 14.0, "monospace_font": true, "always_on_top": true, "dark_mode": true, "auto_save_seconds": 2, "window_width": 800.0, "window_height": 600.0}"#;
+        let mut settings: AppSettings = serde_json::from_str(json).expect("Deserialization failed");
+        settings.validate_and_clamp();
+
+        assert_eq!(
+            settings
+                .keybindings
+                .get(crate::ui::shortcuts::ShortcutAction::NewNote),
+            crate::ui::shortcuts::KeyBinding::ctrl("N")
+        );
+        assert_eq!(
+            settings
+                .keybindings
+                .get(crate::ui::shortcuts::ShortcutAction::SearchNotes),
+            crate::ui::shortcuts::KeyBinding::ctrl("K")
+        );
     }
 }

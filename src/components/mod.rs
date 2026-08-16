@@ -190,48 +190,234 @@ pub mod button {
         changed
     }
 
-    /// Renders a secondary translucent button (e.g. "Cancel", "Export Note").
-    #[allow(dead_code)]
-    pub fn secondary_button(
+    /// Renders a dynamic, animated interactive button with smooth hover glow and tactile click depression.
+    pub fn animated_action_button(
         ui: &mut Ui,
-        text: &str,
-        card: Color32,
-        border: Color32,
+        label: &str,
+        palette: &Palette,
         min_size: egui::Vec2,
     ) -> egui::Response {
-        ui.add(
-            egui::Button::new(
-                RichText::new(text)
-                    .font(FontId::proportional(12.5))
-                    .color(Color32::WHITE),
-            )
-            .fill(Color32::from_rgba_unmultiplied(
-                card.r(),
-                card.g(),
-                card.b(),
-                210,
-            ))
-            .stroke(Stroke::new(1.0_f32, border))
-            .corner_radius(CornerRadius::same(8))
-            .min_size(min_size),
-        )
+        let (mut rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+        let is_hovered = response.hovered();
+        let is_pressed = response.is_pointer_button_down_on();
+
+        let hov_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("hov"), is_hovered);
+        let press_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("press"), is_pressed);
+
+        if press_anim > 0.01 {
+            rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+        }
+
+        let base_bg = Palette::with_alpha(palette.card, 210);
+        let hovered_bg = Palette::lighten(palette.card, 35, 245);
+        let bg = Palette::interpolate_color(base_bg, hovered_bg, hov_anim);
+
+        let base_border = Color32::from_rgba_unmultiplied(
+            palette.border.r(),
+            palette.border.g(),
+            palette.border.b(),
+            120,
+        );
+        let active_border = palette.accent;
+        let border_color = Palette::interpolate_color(base_border, active_border, hov_anim);
+
+        ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(6),
+            Stroke::new(1.0 + 0.3 * hov_anim, border_color),
+            egui::StrokeKind::Outside,
+        );
+
+        let text_color =
+            Palette::interpolate_color(Color32::from_gray(215), Color32::WHITE, hov_anim);
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(12.0),
+            text_color,
+        );
+
+        response
     }
 
-    /// Renders a red-accented destructive action button (e.g. "Close Tab").
-    #[allow(dead_code)]
-    pub fn danger_button(ui: &mut Ui, text: &str, min_size: egui::Vec2) -> egui::Response {
-        ui.add(
-            egui::Button::new(
-                RichText::new(text)
-                    .font(FontId::proportional(12.5))
-                    .strong()
-                    .color(Color32::WHITE),
-            )
-            .fill(Color32::from_rgba_unmultiplied(180, 45, 60, 240))
-            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(239, 68, 68)))
-            .corner_radius(CornerRadius::same(8))
-            .min_size(min_size),
-        )
+    /// Renders a dynamic danger button with vivid pulsing red hover and tactile press feedback.
+    pub fn animated_danger_button(
+        ui: &mut Ui,
+        label: &str,
+        min_size: egui::Vec2,
+    ) -> egui::Response {
+        let (mut rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+        let is_hovered = response.hovered();
+        let is_pressed = response.is_pointer_button_down_on();
+
+        let hov_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("dang_hov"), is_hovered);
+        let press_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("dang_press"), is_pressed);
+
+        if press_anim > 0.01 {
+            rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+        }
+
+        let base_bg = Color32::from_rgba_unmultiplied(170, 25, 25, 230);
+        let hover_bg = Color32::from_rgba_unmultiplied(225, 38, 38, 255);
+        let bg = Palette::interpolate_color(base_bg, hover_bg, hov_anim);
+
+        let base_border = Color32::from_rgba_unmultiplied(220, 38, 38, 160);
+        let hover_border = Color32::from_rgba_unmultiplied(252, 165, 165, 255);
+        let border_color = Palette::interpolate_color(base_border, hover_border, hov_anim);
+
+        ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(6),
+            Stroke::new(1.0 + 0.4 * hov_anim, border_color),
+            egui::StrokeKind::Outside,
+        );
+
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(12.0),
+            Color32::WHITE,
+        );
+
+        response
+    }
+
+    /// Renders a dynamic keybinding badge button with interactive states and recording pulse.
+    pub fn animated_shortcut_badge(
+        ui: &mut Ui,
+        text: &str,
+        is_recording: bool,
+        is_modified: bool,
+        palette: &Palette,
+        min_size: egui::Vec2,
+    ) -> egui::Response {
+        let (mut rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+        let is_hovered = response.hovered();
+        let is_pressed = response.is_pointer_button_down_on();
+
+        let hov_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("sc_hov"), is_hovered);
+        let press_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("sc_press"), is_pressed);
+
+        if press_anim > 0.01 && !is_recording {
+            rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+        }
+
+        if is_recording {
+            ui.ctx().request_repaint();
+            let t = ui.input(|i| i.time);
+            let wave = (t * 4.0).sin().abs() as f32;
+
+            let pulse_bg = Palette::interpolate_color(
+                palette.accent,
+                Palette::lighten(palette.accent, 30, 255),
+                wave,
+            );
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(6), pulse_bg);
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(6),
+                Stroke::new(1.4, Color32::WHITE),
+                egui::StrokeKind::Outside,
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "⌨ Press keys...",
+                FontId::proportional(11.5),
+                Color32::WHITE,
+            );
+        } else {
+            let base_bg = Palette::with_alpha(palette.card, 220);
+            let hover_bg = Palette::lighten(palette.card, 40, 245);
+            let bg = Palette::interpolate_color(base_bg, hover_bg, hov_anim);
+
+            let base_border = if is_modified {
+                palette.accent
+            } else {
+                Palette::with_alpha(palette.border, 140)
+            };
+            let hover_border = palette.accent;
+            let border_color = Palette::interpolate_color(base_border, hover_border, hov_anim);
+
+            ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0 + 0.3 * hov_anim, border_color),
+                egui::StrokeKind::Outside,
+            );
+
+            let text_color = if is_modified {
+                Palette::interpolate_color(palette.accent, Color32::WHITE, hov_anim)
+            } else {
+                Palette::interpolate_color(Color32::from_gray(210), Color32::WHITE, hov_anim)
+            };
+
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                FontId::monospace(11.5),
+                text_color,
+            );
+        }
+
+        response
+    }
+
+    /// Renders a small animated revert/reset button.
+    pub fn animated_revert_button(ui: &mut Ui, palette: &Palette) -> egui::Response {
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), Sense::click());
+        let is_hovered = response.hovered();
+        let hov_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("rev_hov"), is_hovered);
+
+        let bg = Palette::interpolate_color(
+            Color32::TRANSPARENT,
+            Palette::with_alpha(palette.card, 200),
+            hov_anim,
+        );
+        let border = Palette::interpolate_color(Color32::TRANSPARENT, palette.border, hov_anim);
+
+        ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
+        if hov_anim > 0.05 {
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(4),
+                Stroke::new(1.0, border),
+                egui::StrokeKind::Outside,
+            );
+        }
+
+        let icon_color =
+            Palette::interpolate_color(Color32::from_gray(160), Color32::WHITE, hov_anim);
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "↺",
+            FontId::proportional(12.0),
+            icon_color,
+        );
+
+        response
     }
 
     /// Renders a square icon button for header bars with smooth hover & active animations.
