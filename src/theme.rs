@@ -502,8 +502,9 @@ pub fn setup_glassmorphism_theme(ctx: &Context, settings: &AppSettings) {
         (alpha as f32 * 0.6) as u8,
     );
 
-    visuals.selection.bg_fill = palette.accent;
-    visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
+    // Smooth, translucent glass text selection highlight
+    visuals.selection.bg_fill = Palette::with_alpha(palette.accent, 85);
+    visuals.selection.stroke = Stroke::new(1.0_f32, Palette::with_alpha(palette.accent, 160));
 
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
     visuals.widgets.noninteractive.bg_fill =
