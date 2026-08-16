@@ -452,7 +452,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                             egui::ScrollArea::vertical()
                                 .id_salt("ai_preview_scroll")
                                 .max_height(max_preview_height)
-                                .auto_shrink([false, false])
+                                .auto_shrink([false, true])
                                 .show(ui, |ui| {
                                     ui.set_width(ui.available_width());
                                     let preview_frame = egui::Frame::NONE

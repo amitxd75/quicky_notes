@@ -7,7 +7,7 @@ use crate::ui;
 pub use crate::ui::markdown::MarkdownViewMode;
 pub use crate::ui::options_drawer::SettingsTab;
 pub use crate::ui::toast::{Toast, ToastKind};
-use eframe::egui::{self, Color32, Ui, ViewportCommand};
+use eframe::egui::{self, Ui, ViewportCommand};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -54,7 +54,7 @@ pub struct QuickyNotesApp {
     pub last_wallpaper_check: Instant,
 
     /// Cached wallpaper colors for change detection.
-    pub last_wallpaper_colors: Option<(Color32, Color32, Color32)>,
+    pub last_wallpaper_colors: Option<crate::theme::PaletteColors>,
 
     /// ID of note tab waiting for close confirmation in modal dialog.
     pub confirm_close_id: Option<String>,

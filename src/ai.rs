@@ -62,6 +62,8 @@ impl AiProvider {
     pub fn suggested_models(self) -> &'static [&'static str] {
         match self {
             Self::Gemini => &[
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
                 "gemini-3.6-flash",
                 "gemini-3.5-flash",
                 "gemini-3.5-flash-lite",
@@ -305,7 +307,11 @@ async fn execute_ai_chat(req: AiRequest) -> Result<String, String> {
         req.model.trim()
     };
 
-    let chat_future = client.exec_chat(model_name, chat_req, None);
+    let chat_options = genai::chat::ChatOptions::default()
+        .with_temperature(0.2)
+        .with_max_tokens(2048);
+
+    let chat_future = client.exec_chat(model_name, chat_req, Some(&chat_options));
     let chat_res = match tokio::time::timeout(std::time::Duration::from_secs(25), chat_future).await
     {
         Ok(Ok(res)) => res,

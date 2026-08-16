@@ -76,6 +76,18 @@ fn default_custom_border() -> [u8; 3] {
 fn default_custom_accent() -> [u8; 3] {
     [168, 85, 247]
 }
+fn default_custom_secondary_accent() -> [u8; 3] {
+    [56, 189, 248]
+}
+fn default_custom_text() -> [u8; 3] {
+    [235, 240, 250]
+}
+fn default_custom_muted_text() -> [u8; 3] {
+    [155, 165, 180]
+}
+fn default_custom_danger() -> [u8; 3] {
+    [239, 68, 68]
+}
 
 /// User settings configuration, serialized to JSON disk storage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -120,9 +132,25 @@ pub struct AppSettings {
     #[serde(default = "default_custom_border")]
     pub custom_border_color: [u8; 3],
 
-    /// Custom RGB accent color [R, G, B].
+    /// Custom RGB primary accent color [R, G, B].
     #[serde(default = "default_custom_accent")]
     pub custom_accent_color: [u8; 3],
+
+    /// Custom RGB secondary accent color [R, G, B].
+    #[serde(default = "default_custom_secondary_accent")]
+    pub custom_secondary_accent_color: [u8; 3],
+
+    /// Custom RGB primary text color [R, G, B].
+    #[serde(default = "default_custom_text")]
+    pub custom_text_color: [u8; 3],
+
+    /// Custom RGB muted text / label color [R, G, B].
+    #[serde(default = "default_custom_muted_text")]
+    pub custom_muted_text_color: [u8; 3],
+
+    /// Custom RGB danger action color [R, G, B].
+    #[serde(default = "default_custom_danger")]
+    pub custom_danger_color: [u8; 3],
 
     /// Selected system font family name.
     #[serde(default)]
@@ -198,6 +226,10 @@ impl Default for AppSettings {
             custom_card_color: default_custom_card(),
             custom_border_color: default_custom_border(),
             custom_accent_color: default_custom_accent(),
+            custom_secondary_accent_color: default_custom_secondary_accent(),
+            custom_text_color: default_custom_text(),
+            custom_muted_text_color: default_custom_muted_text(),
+            custom_danger_color: default_custom_danger(),
             selected_font: "Default".to_string(),
             show_line_numbers: true,
             tab_size: 4,

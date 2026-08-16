@@ -149,36 +149,179 @@ pub fn hex_to_color(hex: &str) -> Color32 {
     }
 }
 
-/// Cached wallpaper file modification time to avoid redundant disk reads and JSON parsing.
+/// Cached wallpaper file modification times to avoid redundant disk reads and parsing.
 struct WallpaperCache {
     caelestia_mtime: Option<SystemTime>,
+    btop_mtime: Option<SystemTime>,
     pywal_mtime: Option<SystemTime>,
-    colors: Option<(Color32, Color32, Color32)>,
+    colors: Option<PaletteColors>,
 }
 
 static WALLPAPER_CACHE: Mutex<WallpaperCache> = Mutex::new(WallpaperCache {
     caelestia_mtime: None,
+    btop_mtime: None,
     pywal_mtime: None,
     colors: None,
 });
 
 /// Gets wallpaper color file paths in user home directory.
-fn get_wallpaper_paths() -> Option<(PathBuf, PathBuf)> {
+fn get_wallpaper_paths() -> Option<(PathBuf, PathBuf, PathBuf)> {
     let home = directories::UserDirs::new()?.home_dir().to_path_buf();
     let caelestia = home.join(".config/qtengine/caelestia.colors");
+    let btop_caelestia = home.join(".config/btop/themes/caelestia.theme");
     let pywal = home.join(".cache/wal/colors.json");
-    Some((caelestia, pywal))
+    Some((caelestia, btop_caelestia, pywal))
 }
 
 fn get_file_mtime(path: &Path) -> Option<SystemTime> {
     fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
+/// Computes vibrancy score of an RGB color to find the most energetic wallpaper accent.
+fn color_vibrancy(c: Color32) -> f32 {
+    let r = c.r() as f32 / 255.0;
+    let g = c.g() as f32 / 255.0;
+    let b = c.b() as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    if max == 0.0 || delta == 0.0 {
+        return 0.0;
+    }
+
+    let lightness = (max + min) / 2.0;
+    let saturation = if lightness > 0.5 {
+        delta / (2.0 - max - min)
+    } else {
+        delta / (max + min)
+    };
+
+    // Strongly reward rich saturation with balanced luminance (45% - 75%)
+    saturation * (1.0 - (lightness - 0.60).abs() * 1.5).max(0.1)
+}
+
+/// Enhances an accent color with rich saturation and luminous contrast on dark glass.
+pub fn boost_accent_vibrancy(c: Color32) -> Color32 {
+    let r = c.r() as f32 / 255.0;
+    let g = c.g() as f32 / 255.0;
+    let b = c.b() as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    if delta < 0.06 {
+        // If near grayscale, use vibrant purple
+        return Color32::from_rgb(168, 85, 247);
+    }
+
+    let lightness = ((max + min) / 2.0).clamp(0.55, 0.72);
+    let saturation = 0.85_f32;
+
+    let d = saturation
+        * if lightness < 0.5 {
+            lightness
+        } else {
+            1.0 - lightness
+        };
+    let norm_r = (r - min) / delta;
+    let norm_g = (g - min) / delta;
+    let norm_b = (b - min) / delta;
+
+    let res_r = ((lightness + (norm_r - 0.5) * 2.0 * d) * 255.0).clamp(0.0, 255.0) as u8;
+    let res_g = ((lightness + (norm_g - 0.5) * 2.0 * d) * 255.0).clamp(0.0, 255.0) as u8;
+    let res_b = ((lightness + (norm_b - 0.5) * 2.0 * d) * 255.0).clamp(0.0, 255.0) as u8;
+
+    Color32::from_rgb(res_r, res_g, res_b)
+}
+
+/// Parses KDE / Caelestia INI format color files (`caelestia.colors` or `caelestia.theme`).
+fn parse_caelestia_content(content: &str) -> Option<PaletteColors> {
+    let mut bg = None;
+    let mut card = None;
+    let mut accent_candidates: Vec<Color32> = Vec::new();
+    let mut border = None;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+            continue;
+        }
+        if let Some((key, raw_val)) = line.split_once('=') {
+            let key = key.trim();
+            let val = raw_val.trim().trim_matches('"').trim_matches('\'');
+            if val.len() < 4 {
+                continue;
+            }
+
+            match key {
+                "BackgroundNormal" if bg.is_none() => bg = Some(hex_to_color(val)),
+                "theme[main_bg]" | "theme[selected_bg]" if bg.is_none() => {
+                    bg = Some(hex_to_color(val))
+                }
+                "BackgroundAlternate" | "activeBackground" if card.is_none() => {
+                    card = Some(hex_to_color(val))
+                }
+                "ForegroundNeutral"
+                | "ForegroundPositive"
+                | "ForegroundLink"
+                | "ForegroundNegative"
+                | "DecorationFocus"
+                | "theme[hi_fg]"
+                | "theme[cpu_box]"
+                | "theme[available_start]"
+                | "theme[process_start]" => {
+                    accent_candidates.push(hex_to_color(val));
+                }
+                "DecorationHover" | "inactiveBackground" | "theme[div_line]"
+                    if border.is_none() =>
+                {
+                    border = Some(hex_to_color(val))
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Pick the most vibrant accent candidate
+    let best_accent = accent_candidates
+        .into_iter()
+        .max_by(|a, b| {
+            color_vibrancy(*a)
+                .partial_cmp(&color_vibrancy(*b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(boost_accent_vibrancy);
+
+    if let (Some(b), Some(a)) = (bg, best_accent) {
+        // Create atmospheric glass depth: tint background and card with subtle ambient tone of the accent
+        let ambient_bg = Palette::interpolate_color(b, Palette::with_alpha(a, 20), 0.15);
+        let card = card
+            .map(|c| Palette::interpolate_color(c, Palette::with_alpha(a, 35), 0.20))
+            .unwrap_or_else(|| Palette::interpolate_color(Palette::lighten(b, 24, 255), a, 0.18));
+        let border = border
+            .map(|br| Palette::interpolate_color(br, a, 0.45))
+            .unwrap_or_else(|| Palette::interpolate_color(card, a, 0.50));
+
+        Some(PaletteColors {
+            bg: ambient_bg,
+            card,
+            border,
+            accent: a,
+        })
+    } else {
+        None
+    }
+}
+
 /// Reads active wallpaper colors from Caelestia or Pywal cache with mtime check.
-pub fn get_wallpaper_colors() -> Option<(Color32, Color32, Color32)> {
-    let (caelestia_path, pywal_path) = get_wallpaper_paths()?;
+pub fn get_wallpaper_colors() -> Option<PaletteColors> {
+    let (caelestia_path, btop_path, pywal_path) = get_wallpaper_paths()?;
 
     let current_caelestia_mtime = get_file_mtime(&caelestia_path);
+    let current_btop_mtime = get_file_mtime(&btop_path);
     let current_pywal_mtime = get_file_mtime(&pywal_path);
 
     {
@@ -188,68 +331,67 @@ pub fn get_wallpaper_colors() -> Option<(Color32, Color32, Color32)> {
         });
         if cache.colors.is_some()
             && cache.caelestia_mtime == current_caelestia_mtime
+            && cache.btop_mtime == current_btop_mtime
             && cache.pywal_mtime == current_pywal_mtime
         {
             return cache.colors;
         }
     }
 
-    // Try parsing Caelestia format first
-    if let Ok(content) = fs::read_to_string(&caelestia_path) {
-        let mut bg = None;
-        let mut accent = None;
-        let mut border = None;
-
-        for line in content.lines() {
-            let line = line.trim();
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((key, raw_val)) = line.split_once('=') {
-                let key = key.trim();
-                let val = raw_val.trim().trim_matches('"').trim_matches('\'');
-                match key {
-                    "background" => bg = Some(hex_to_color(val)),
-                    "color4" | "primary" => accent = Some(hex_to_color(val)),
-                    "color1" => border = Some(hex_to_color(val)),
-                    _ => {}
-                }
-            }
+    // 1. Try parsing Caelestia qtengine colors
+    if let Ok(content) = fs::read_to_string(&caelestia_path)
+        && let Some(palette) = parse_caelestia_content(&content)
+    {
+        if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
+            cache.caelestia_mtime = current_caelestia_mtime;
+            cache.btop_mtime = current_btop_mtime;
+            cache.pywal_mtime = current_pywal_mtime;
+            cache.colors = Some(palette);
         }
-
-        if let (Some(b), Some(a), Some(br)) = (bg, accent, border) {
-            let parsed = Some((b, a, br));
-            if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
-                cache.caelestia_mtime = current_caelestia_mtime;
-                cache.pywal_mtime = current_pywal_mtime;
-                cache.colors = parsed;
-            }
-            return parsed;
-        }
+        return Some(palette);
     }
 
-    // Try parsing Pywal format
+    // 2. Try parsing Caelestia btop theme
+    if let Ok(content) = fs::read_to_string(&btop_path)
+        && let Some(palette) = parse_caelestia_content(&content)
+    {
+        if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
+            cache.caelestia_mtime = current_caelestia_mtime;
+            cache.btop_mtime = current_btop_mtime;
+            cache.pywal_mtime = current_pywal_mtime;
+            cache.colors = Some(palette);
+        }
+        return Some(palette);
+    }
+
+    // 3. Try parsing Pywal colors.json
     if let Ok(content) = fs::read_to_string(&pywal_path)
         && let Ok(data) = serde_json::from_str::<PywalColors>(&content)
     {
         let bg = hex_to_color(&data.special.background);
         let border = hex_to_color(&data.colors.color1);
         let accent = hex_to_color(&data.colors.color4);
-        let parsed = Some((bg, accent, border));
+        let card = Palette::lighten(bg, 18, 255);
+        let palette = PaletteColors {
+            bg,
+            card,
+            border,
+            accent,
+        };
         if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
             cache.caelestia_mtime = current_caelestia_mtime;
+            cache.btop_mtime = current_btop_mtime;
             cache.pywal_mtime = current_pywal_mtime;
-            cache.colors = parsed;
+            cache.colors = Some(palette);
         }
-        return parsed;
+        return Some(palette);
     }
 
     None
 }
 
 /// Checks whether wallpaper colors have changed since the last check.
-pub fn check_wallpaper_color_change(last_colors: &mut Option<(Color32, Color32, Color32)>) -> bool {
+pub fn check_wallpaper_color_change(last_colors: &mut Option<PaletteColors>) -> bool {
     let current = get_wallpaper_colors();
     if current != *last_colors {
         *last_colors = current;
@@ -285,18 +427,8 @@ pub fn get_palette(settings: &AppSettings) -> PaletteColors {
             ),
         },
         ThemeMode::WallpaperSync => {
-            if let Some((bg, accent, border)) = get_wallpaper_colors() {
-                let card = Color32::from_rgb(
-                    ((bg.r() as u16 + 20).min(255)) as u8,
-                    ((bg.g() as u16 + 18).min(255)) as u8,
-                    ((bg.b() as u16 + 32).min(255)) as u8,
-                );
-                PaletteColors {
-                    bg,
-                    card,
-                    border,
-                    accent,
-                }
+            if let Some(palette) = get_wallpaper_colors() {
+                palette
             } else {
                 PaletteColors {
                     bg: Color32::from_rgb(18, 12, 28),

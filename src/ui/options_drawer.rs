@@ -319,6 +319,7 @@ fn render_custom_colors_card(
         let mut color_changed = false;
         let col_w = (ui.available_width() - 16.0) * 0.5;
 
+        // Row 1: Surfaces
         ui.horizontal(|ui| {
             color_changed |= color_picker_item(
                 ui,
@@ -328,7 +329,7 @@ fn render_custom_colors_card(
             );
             color_changed |= color_picker_item(
                 ui,
-                "Card Container",
+                "Card Surface",
                 &mut app.data.settings.custom_card_color,
                 col_w,
             );
@@ -336,6 +337,7 @@ fn render_custom_colors_card(
 
         ui.add_space(4.0);
 
+        // Row 2: Outline & Main Accent
         ui.horizontal(|ui| {
             color_changed |= color_picker_item(
                 ui,
@@ -345,8 +347,44 @@ fn render_custom_colors_card(
             );
             color_changed |= color_picker_item(
                 ui,
-                "Accent Color",
+                "Primary Accent",
                 &mut app.data.settings.custom_accent_color,
+                col_w,
+            );
+        });
+
+        ui.add_space(4.0);
+
+        // Row 3: Secondary Accent & Text
+        ui.horizontal(|ui| {
+            color_changed |= color_picker_item(
+                ui,
+                "Secondary Accent",
+                &mut app.data.settings.custom_secondary_accent_color,
+                col_w,
+            );
+            color_changed |= color_picker_item(
+                ui,
+                "Primary Text",
+                &mut app.data.settings.custom_text_color,
+                col_w,
+            );
+        });
+
+        ui.add_space(4.0);
+
+        // Row 4: Muted Text & Danger
+        ui.horizontal(|ui| {
+            color_changed |= color_picker_item(
+                ui,
+                "Muted Text",
+                &mut app.data.settings.custom_muted_text_color,
+                col_w,
+            );
+            color_changed |= color_picker_item(
+                ui,
+                "Danger Action",
+                &mut app.data.settings.custom_danger_color,
                 col_w,
             );
         });
