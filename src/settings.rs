@@ -159,6 +159,14 @@ pub struct AppSettings {
     /// User-customizable keyboard shortcut keybindings map.
     #[serde(default)]
     pub keybindings: crate::ui::shortcuts::KeyBindings,
+
+    /// AI Copilot and assistant configuration.
+    #[serde(default)]
+    pub ai: crate::ai::AiSettings,
+
+    /// Whether to enable real-time language syntax highlighting in the editor.
+    #[serde(default = "default_true")]
+    pub enable_syntax_highlighting: bool,
 }
 
 const fn default_true() -> bool {
@@ -199,6 +207,8 @@ impl Default for AppSettings {
             corner_radius: 14.0,
             default_extension: ".txt".to_string(),
             keybindings: crate::ui::shortcuts::KeyBindings::default(),
+            ai: crate::ai::AiSettings::default(),
+            enable_syntax_highlighting: true,
         }
     }
 }

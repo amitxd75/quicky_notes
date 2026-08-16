@@ -6,7 +6,7 @@
 use crate::settings::AppSettings;
 use crate::theme::{self, Palette};
 use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Frame, Margin, RichText, Sense, Stroke, Ui, UiBuilder,
+    self, Color32, CornerRadius, FontId, Frame, Margin, RichText, Sense, Stroke, Ui,
 };
 
 /// Card and glass panel container frames.
@@ -31,6 +31,7 @@ pub mod card {
     }
 
     /// Creates a glass card container frame for settings cards and dialogs.
+    #[allow(dead_code)]
     pub fn glass_card_frame(settings: &AppSettings) -> Frame {
         let palette = theme::get_palette(settings);
         let alpha = (settings.opacity * 255.0).clamp(160.0, 240.0) as u8;
@@ -241,6 +242,57 @@ pub mod button {
             label,
             FontId::proportional(12.0),
             text_color,
+        );
+
+        response
+    }
+
+    /// Renders a dynamic primary action button filled with the active theme accent color.
+    pub fn animated_primary_button(
+        ui: &mut Ui,
+        label: &str,
+        palette: &Palette,
+        min_size: egui::Vec2,
+    ) -> egui::Response {
+        let (mut rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+        let is_hovered = response.hovered();
+        let is_pressed = response.is_pointer_button_down_on();
+
+        let hov_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("hov"), is_hovered);
+        let press_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("press"), is_pressed);
+
+        if press_anim > 0.01 {
+            rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+        }
+
+        let base_bg = Palette::with_alpha(palette.accent, 220);
+        let hovered_bg = Palette::lighten(palette.accent, 30, 255);
+        let bg = Palette::interpolate_color(base_bg, hovered_bg, hov_anim);
+
+        let border_color = Palette::interpolate_color(
+            Palette::with_alpha(palette.accent, 160),
+            Color32::WHITE,
+            hov_anim * 0.4,
+        );
+
+        ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(6),
+            Stroke::new(1.0 + 0.3 * hov_anim, border_color),
+            egui::StrokeKind::Outside,
+        );
+
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(12.0),
+            Color32::WHITE,
         );
 
         response
@@ -813,30 +865,41 @@ pub mod modal {
         modal_size: egui::Vec2,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) {
+        let palette = theme::get_palette(settings);
+        let screen_rect = ctx.content_rect();
+
+        // 1. Paint subtle translucent backdrop directly to layer
+        ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new((id, "backdrop")),
+        ))
+        .rect_filled(
+            screen_rect,
+            CornerRadius::ZERO,
+            Color32::from_rgba_unmultiplied(0, 0, 0, 50),
+        );
+
+        // 2. Centered interactive modal Area
+        let modal_rect = egui::Rect::from_center_size(screen_rect.center(), modal_size);
         egui::Area::new(egui::Id::new(id))
             .order(egui::Order::Foreground)
-            .fixed_pos(egui::Pos2::ZERO)
+            .fixed_pos(modal_rect.min)
             .show(ctx, |ui| {
-                let screen_rect = ui.clip_rect();
+                ui.set_width(modal_size.x);
+                ui.set_height(modal_size.y);
 
-                // Dimmed backdrop mask
-                let _ = ui.allocate_rect(screen_rect, Sense::click());
-                ui.painter().rect_filled(
-                    screen_rect,
-                    CornerRadius::ZERO,
-                    Color32::from_black_alpha(180),
-                );
-
-                let modal_rect = egui::Rect::from_center_size(screen_rect.center(), modal_size);
-                let mut child_ui = ui.new_child(UiBuilder::new().max_rect(modal_rect));
-
-                let palette = theme::get_palette(settings);
-                let frame = card::glass_card_frame(settings)
-                    .stroke(Stroke::new(1.2, palette.border))
+                let frame = egui::Frame::NONE
+                    .fill(Color32::from_rgba_unmultiplied(
+                        palette.card.r(),
+                        palette.card.g(),
+                        palette.card.b(),
+                        245,
+                    ))
+                    .stroke(Stroke::new(1.0, palette.border))
                     .corner_radius(CornerRadius::same(12))
-                    .inner_margin(Margin::same(16));
+                    .inner_margin(Margin::same(18));
 
-                frame.show(&mut child_ui, add_contents);
+                frame.show(ui, add_contents);
             });
     }
 }

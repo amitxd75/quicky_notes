@@ -20,6 +20,7 @@ pub enum ShortcutAction {
     ToggleAlwaysOnTop,
     IncreaseFontSize,
     DecreaseFontSize,
+    AiAssist,
     NextTab,
     PrevTab,
     SwitchTab1,
@@ -41,6 +42,7 @@ impl ShortcutAction {
         Self::CloseNote,
         Self::SaveNotes,
         Self::ToggleMarkdown,
+        Self::AiAssist,
         Self::SearchNotes,
         Self::OpenSettings,
         Self::ExportNote,
@@ -68,6 +70,7 @@ impl ShortcutAction {
             Self::CloseNote => "Close Active Tab",
             Self::SaveNotes => "Save Notes to Disk",
             Self::ToggleMarkdown => "Toggle Markdown Preview",
+            Self::AiAssist => "AI Copilot & Fixer",
             Self::SearchNotes => "Search & Browse Notes",
             Self::OpenSettings => "Open Settings & Preferences",
             Self::ExportNote => "Export Active Note to File",
@@ -109,9 +112,10 @@ impl ShortcutAction {
                 "Note Operations"
             }
 
-            Self::ToggleMarkdown | Self::IncreaseFontSize | Self::DecreaseFontSize => {
-                "Editor & View"
-            }
+            Self::ToggleMarkdown
+            | Self::AiAssist
+            | Self::IncreaseFontSize
+            | Self::DecreaseFontSize => "Editor & View",
 
             Self::SearchNotes | Self::OpenSettings | Self::ToggleAlwaysOnTop => "Window & Modals",
         }
@@ -124,6 +128,7 @@ impl ShortcutAction {
             Self::CloseNote => KeyBinding::ctrl("W"),
             Self::SaveNotes => KeyBinding::ctrl("S"),
             Self::ToggleMarkdown => KeyBinding::ctrl("P"),
+            Self::AiAssist => KeyBinding::ctrl("Enter"),
             Self::SearchNotes => KeyBinding::ctrl("K"),
             Self::OpenSettings => KeyBinding::ctrl(","),
             Self::ExportNote => KeyBinding::ctrl_shift("E"),
@@ -487,6 +492,11 @@ impl KeyBindings {
 
 /// Evaluates global keyboard shortcuts and handles interactive shortcut recording.
 pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) {
+    // If the AI Copilot modal is open, let the modal handle all keyboard interactions
+    if app.ai_modal.is_open {
+        return;
+    }
+
     // 1. Handle interactive shortcut recording mode in settings
     if let Some(recording_action) = app.recording_shortcut {
         let captured = ctx.input(|i| {
@@ -678,6 +688,29 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     let trigger_close_note = ctx.input(|i| kb.get(ShortcutAction::CloseNote).matches_input(i));
     let trigger_save = ctx.input(|i| kb.get(ShortcutAction::SaveNotes).matches_input(i));
     let trigger_markdown = ctx.input(|i| kb.get(ShortcutAction::ToggleMarkdown).matches_input(i));
+
+    // Consume AI assist key so TextEdit doesn't insert an unwanted newline
+    let ai_binding = kb.get(ShortcutAction::AiAssist);
+    let mut trigger_ai = false;
+    if let Some(key) = ai_binding.to_egui_key() {
+        let mut modifiers = egui::Modifiers::NONE;
+        if ai_binding.ctrl {
+            modifiers |= egui::Modifiers::CTRL;
+        }
+        if ai_binding.shift {
+            modifiers |= egui::Modifiers::SHIFT;
+        }
+        if ai_binding.alt {
+            modifiers |= egui::Modifiers::ALT;
+        }
+        if ctx.input_mut(|i| i.consume_key(modifiers, key)) {
+            trigger_ai = true;
+        }
+    }
+    if !trigger_ai && ctx.input(|i| ai_binding.matches_input(i)) {
+        trigger_ai = true;
+    }
+
     let trigger_search = ctx.input(|i| kb.get(ShortcutAction::SearchNotes).matches_input(i));
     let trigger_settings = ctx.input(|i| kb.get(ShortcutAction::OpenSettings).matches_input(i));
     let trigger_export = ctx.input(|i| kb.get(ShortcutAction::ExportNote).matches_input(i));
@@ -736,6 +769,11 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         } else {
             app.set_status("Markdown preview only available for .md files");
         }
+    }
+
+    if trigger_ai {
+        app.trigger_ai_assist();
+        ctx.request_repaint();
     }
 
     if trigger_search {
@@ -836,18 +874,25 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             }
         }
 
-        // Escape: Close modals if open, else close app window
+        // Escape: Close active overlays, modals, and drawers; clear text selection; refocus editor
         if i.key_pressed(egui::Key::Escape) {
             if app.confirm_close_id.is_some() {
                 app.confirm_close_id = None;
+            } else if app.ai_modal.is_open {
+                app.ai_modal.close();
+                app.focus_editor = true;
             } else if app.show_options || app.show_search {
                 app.show_options = false;
                 app.show_search = false;
                 app.focus_editor = true;
+            } else if let Some((_start, end)) = app.last_cursor_range
+                && _start < end
+            {
+                // Clear active text selection on Escape
+                app.last_cursor_range = Some((end, end));
+                app.focus_editor = true;
             } else {
-                app.is_closing = true;
-                app.save_if_dirty();
-                ctx.send_viewport_cmd(ViewportCommand::Close);
+                app.focus_editor = true;
             }
         }
     });

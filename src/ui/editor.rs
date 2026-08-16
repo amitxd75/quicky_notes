@@ -88,6 +88,8 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
 
     let palette = theme::get_palette(&app.data.settings);
     let mut content_changed = false;
+    let mut context_menu_action: Option<crate::ui::context_menu::ContextMenuAction> = None;
+    let current_cursor_range = app.last_cursor_range;
 
     if let Some(active_id) = app.data.active_note_id.as_deref()
         && let Some(note) = app.data.notes.iter_mut().find(|n| n.id == active_id)
@@ -105,6 +107,14 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
         } else {
             crate::app::MarkdownViewMode::Edit
         };
+
+        let language = if app.data.settings.enable_syntax_highlighting {
+            crate::ui::syntax::detect_language(&note.title, note.file_path.as_deref())
+        } else {
+            ""
+        };
+        let code_theme =
+            egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
 
         match effective_mode {
             crate::app::MarkdownViewMode::Edit => {
@@ -134,21 +144,77 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                 ui.add_space(8.0);
                             }
 
-                            // Multiline text editor
-                            let font = if is_monospace {
-                                FontId::monospace(font_size)
-                            } else {
-                                FontId::proportional(font_size)
-                            };
+                            // Multiline text editor with syntax coloration
+                            let mut layouter =
+                                |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+                                    let text = buffer.as_str();
+                                    let font_id = if is_monospace {
+                                        FontId::monospace(font_size)
+                                    } else {
+                                        FontId::proportional(font_size)
+                                    };
+                                    let opts = crate::ui::syntax::HighlightOptions {
+                                        theme: &code_theme,
+                                        language,
+                                        font_id,
+                                        text_color: Color32::WHITE,
+                                        wrap_width,
+                                    };
+                                    let layout_job = crate::ui::syntax::highlight_text(
+                                        ui.ctx(),
+                                        ui.style(),
+                                        text,
+                                        opts,
+                                    );
+                                    ui.fonts_mut(|f| f.layout_job(layout_job))
+                                };
 
                             let text_edit = egui::TextEdit::multiline(&mut note.content)
-                                .font(font)
-                                .text_color(Color32::WHITE)
                                 .frame(egui::Frame::NONE)
                                 .hint_text("Type your notes here...")
-                                .desired_width(ui.available_width());
+                                .desired_width(ui.available_width())
+                                .layouter(&mut layouter);
 
-                            let resp = ui.add(text_edit);
+                            let output = text_edit.show(ui);
+                            let resp = output.response;
+
+                            let is_rmb = ui.input(|i| {
+                                i.pointer.button_down(egui::PointerButton::Secondary)
+                                    || i.pointer.button_clicked(egui::PointerButton::Secondary)
+                            });
+
+                            if is_rmb
+                                && let Some((start, end)) = current_cursor_range
+                                && start < end
+                            {
+                                // Preserve active text selection on right-click
+                                app.last_cursor_range = Some((start, end));
+                                let mut state =
+                                    egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
+                                        .unwrap_or(output.state);
+                                state.cursor.set_char_range(Some(
+                                    egui::text_selection::CCursorRange::two(
+                                        egui::text::CCursor::new(start),
+                                        egui::text::CCursor::new(end),
+                                    ),
+                                ));
+                                state.store(ui.ctx(), resp.id);
+                            } else if let Some(range) = output.state.cursor.char_range() {
+                                let p: usize = range.primary.index.into();
+                                let s: usize = range.secondary.index.into();
+                                app.last_cursor_range = Some((p.min(s), p.max(s)));
+                            }
+
+                            // Right-click Context Menu (Cut, Copy, Paste, AI Copilot, etc.)
+                            resp.context_menu(|ui| {
+                                crate::ui::context_menu::render_editor_context_menu(
+                                    ui,
+                                    note,
+                                    app.last_cursor_range,
+                                    &palette,
+                                    &mut context_menu_action,
+                                );
+                            });
 
                             if resp.changed() {
                                 content_changed = true;
@@ -188,7 +254,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                     });
             }
             crate::app::MarkdownViewMode::Split => {
-                let half_width = (ui.available_width() - 16.0) * 0.5;
+                let half_width = (ui.available_width() - 16.0) / 2.0;
 
                 ui.horizontal(|ui| {
                     // Left column: Editor
@@ -204,22 +270,94 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                     if app.data.settings.show_line_numbers {
                                         render_line_numbers_gutter(ui, line_count, &line_font);
                                         ui.add_space(6.0);
+
+                                        let (_, rect) = ui.allocate_space(egui::vec2(
+                                            1.0,
+                                            editor_height.max(300.0),
+                                        ));
+                                        ui.painter().line_segment(
+                                            [rect.min, egui::pos2(rect.min.x, rect.max.y)],
+                                            Stroke::new(
+                                                1.0_f32,
+                                                Color32::from_rgba_unmultiplied(80, 50, 110, 60),
+                                            ),
+                                        );
+                                        ui.add_space(6.0);
                                     }
 
-                                    let font = if is_monospace {
-                                        FontId::monospace(font_size)
-                                    } else {
-                                        FontId::proportional(font_size)
-                                    };
+                                    let mut split_layouter =
+                                        |ui: &egui::Ui,
+                                         buffer: &dyn egui::TextBuffer,
+                                         wrap_width: f32| {
+                                            let text = buffer.as_str();
+                                            let font_id = if is_monospace {
+                                                FontId::monospace(font_size)
+                                            } else {
+                                                FontId::proportional(font_size)
+                                            };
+                                            let opts = crate::ui::syntax::HighlightOptions {
+                                                theme: &code_theme,
+                                                language,
+                                                font_id,
+                                                text_color: Color32::WHITE,
+                                                wrap_width,
+                                            };
+                                            let layout_job = crate::ui::syntax::highlight_text(
+                                                ui.ctx(),
+                                                ui.style(),
+                                                text,
+                                                opts,
+                                            );
+                                            ui.fonts_mut(|f| f.layout_job(layout_job))
+                                        };
 
                                     let text_edit = egui::TextEdit::multiline(&mut note.content)
-                                        .font(font)
-                                        .text_color(Color32::WHITE)
                                         .frame(egui::Frame::NONE)
                                         .hint_text("Type markdown here...")
-                                        .desired_width(ui.available_width());
+                                        .desired_width(ui.available_width())
+                                        .layouter(&mut split_layouter);
 
-                                    let resp = ui.add(text_edit);
+                                    let output = text_edit.show(ui);
+                                    let resp = output.response;
+
+                                    let is_rmb = ui.input(|i| {
+                                        i.pointer.button_down(egui::PointerButton::Secondary)
+                                            || i.pointer
+                                                .button_clicked(egui::PointerButton::Secondary)
+                                    });
+
+                                    if is_rmb
+                                        && let Some((start, end)) = current_cursor_range
+                                        && start < end
+                                    {
+                                        // Preserve active text selection on right-click
+                                        app.last_cursor_range = Some((start, end));
+                                        let mut state =
+                                            egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
+                                                .unwrap_or(output.state);
+                                        state.cursor.set_char_range(Some(
+                                            egui::text_selection::CCursorRange::two(
+                                                egui::text::CCursor::new(start),
+                                                egui::text::CCursor::new(end),
+                                            ),
+                                        ));
+                                        state.store(ui.ctx(), resp.id);
+                                    } else if let Some(range) = output.state.cursor.char_range() {
+                                        let p: usize = range.primary.index.into();
+                                        let s: usize = range.secondary.index.into();
+                                        app.last_cursor_range = Some((p.min(s), p.max(s)));
+                                    }
+
+                                    // Right-click Context Menu
+                                    resp.context_menu(|ui| {
+                                        crate::ui::context_menu::render_editor_context_menu(
+                                            ui,
+                                            note,
+                                            app.last_cursor_range,
+                                            &palette,
+                                            &mut context_menu_action,
+                                        );
+                                    });
 
                                     if resp.changed() {
                                         content_changed = true;
@@ -270,6 +408,85 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             note.update_timestamp();
             app.is_dirty = true;
         }
+    }
+
+    // Execute actions triggered from the right-click context menu
+    if let Some(action) = context_menu_action {
+        let cursor_range = app.last_cursor_range;
+        match action {
+            crate::ui::context_menu::ContextMenuAction::LaunchAi => {
+                app.trigger_ai_assist();
+            }
+            crate::ui::context_menu::ContextMenuAction::Cut => {
+                if let Some((start, end)) = cursor_range
+                    && start < end
+                    && let Some(note) = app.active_note_mut()
+                {
+                    let text = note.char_slice(start, end);
+                    crate::ui::context_menu::set_clipboard_text(&text);
+                    crate::ui::context_menu::delete_selection(note, start, end);
+                    app.last_cursor_range = Some((start, start));
+                    app.is_dirty = true;
+                    app.show_toast("Cut to clipboard", crate::ui::toast::ToastKind::Success);
+                }
+            }
+            crate::ui::context_menu::ContextMenuAction::Copy => {
+                if let Some(note) = app.active_note() {
+                    let text = if let Some((start, end)) = cursor_range
+                        && start < end
+                    {
+                        note.char_slice(start, end)
+                    } else {
+                        note.content.clone()
+                    };
+                    crate::ui::context_menu::set_clipboard_text(&text);
+                    app.show_toast("Copied to clipboard", crate::ui::toast::ToastKind::Success);
+                }
+            }
+            crate::ui::context_menu::ContextMenuAction::Paste => {
+                let clip = crate::ui::context_menu::get_clipboard_text();
+                if !clip.is_empty()
+                    && let Some(note) = app.active_note_mut()
+                {
+                    let s = cursor_range.map_or(note.char_len(), |(st, _)| st);
+                    crate::ui::context_menu::insert_or_replace_text(note, &clip, cursor_range);
+                    let new_pos = s + clip.chars().count();
+                    app.last_cursor_range = Some((new_pos, new_pos));
+                    app.is_dirty = true;
+                    app.show_toast(
+                        "Pasted from clipboard",
+                        crate::ui::toast::ToastKind::Success,
+                    );
+                }
+            }
+            crate::ui::context_menu::ContextMenuAction::Delete => {
+                if let Some((start, end)) = cursor_range
+                    && start < end
+                    && let Some(note) = app.active_note_mut()
+                {
+                    crate::ui::context_menu::delete_selection(note, start, end);
+                    app.last_cursor_range = Some((start, start));
+                    app.is_dirty = true;
+                }
+            }
+            crate::ui::context_menu::ContextMenuAction::SelectAll => {
+                if let Some(note) = app.active_note() {
+                    app.last_cursor_range = Some((0, note.content.len()));
+                }
+            }
+            crate::ui::context_menu::ContextMenuAction::SearchNotes => {
+                app.show_search = true;
+                app.focus_search = true;
+            }
+            crate::ui::context_menu::ContextMenuAction::SaveNotes => {
+                app.save_notes_to_disk();
+                app.show_toast(
+                    "Notes saved to disk ✓",
+                    crate::ui::toast::ToastKind::Success,
+                );
+            }
+        }
+        _ctx.request_repaint();
     }
 }
 
@@ -509,52 +726,61 @@ pub fn render_close_confirmation_modal(app: &mut QuickyNotesApp, ctx: &egui::Con
         ctx,
         "confirm_close_modal",
         &settings,
-        egui::vec2(380.0, 150.0),
+        egui::vec2(380.0, 140.0),
         |ui| {
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 12.0;
+                ui.spacing_mut().item_spacing.y = 10.0;
 
-                // Header with warning icon and title description
+                // Header with title and compact close button
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
                     ui.label(
-                        RichText::new("⚠️")
-                            .font(FontId::proportional(22.0))
+                        RichText::new("Close Note Tab?")
+                            .font(FontId::proportional(15.0))
+                            .strong()
                             .color(Color32::WHITE),
                     );
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 3.0;
-                        ui.label(
-                            RichText::new("Close Note Tab?")
-                                .font(FontId::proportional(15.0))
-                                .strong()
-                                .color(Color32::WHITE),
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let close_x = crate::components::button::icon_button(
+                            ui,
+                            "✕",
+                            false,
+                            &palette,
+                            12.0,
+                            egui::vec2(24.0, 24.0),
                         );
-                        ui.label(
-                            RichText::new(format!(
-                                "Are you sure you want to close '{}'?",
-                                note_title
-                            ))
-                            .font(FontId::proportional(12.5))
-                            .color(Color32::from_gray(190)),
-                        );
+                        if close_x.on_hover_text("Cancel (Esc)").clicked() {
+                            app.confirm_close_id = None;
+                        }
                     });
                 });
 
-                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "Are you sure you want to close '{}'? Unsaved changes will be discarded.",
+                        note_title
+                    ))
+                    .font(FontId::proportional(12.5))
+                    .color(Color32::from_gray(195)),
+                );
 
-                // Right-aligned action buttons
+                ui.add_space(8.0);
+
+                // Action buttons
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 10.0;
 
                         let confirm_btn = crate::components::button::animated_danger_button(
                             ui,
-                            "🗑  Close Note",
-                            egui::vec2(105.0, 32.0),
+                            "Close Note",
+                            egui::vec2(100.0, 30.0),
                         );
 
                         if confirm_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            ctx.input_mut(|i| {
+                                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            });
                             app.close_note(&close_id);
                             app.confirm_close_id = None;
                             ctx.request_repaint();
@@ -562,12 +788,15 @@ pub fn render_close_confirmation_modal(app: &mut QuickyNotesApp, ctx: &egui::Con
 
                         let cancel_btn = crate::components::button::animated_action_button(
                             ui,
-                            "Cancel (Esc)",
+                            "Cancel",
                             &palette,
-                            egui::vec2(95.0, 32.0),
+                            egui::vec2(80.0, 30.0),
                         );
 
                         if cancel_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            ctx.input_mut(|i| {
+                                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                            });
                             app.confirm_close_id = None;
                             ctx.request_repaint();
                         }

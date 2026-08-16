@@ -9,14 +9,17 @@ I built this because I wanted a lightweight popup note widget that matches my de
 ## Features
 
 - Auto-syncs with Pywal & Caelestia wallpaper colors
+- Multi-provider AI Copilot & Fixer (`Ctrl+Enter`) supporting Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama & OpenRouter
+- Real-time language syntax highlighting for code and markdown (`.rs`, `.py`, `.js`, `.ts`, `.json`, `.toml`, `.yaml`, `.c`, `.cpp`, `.sh`, etc.)
+- IDE-style right-click context menu (Cut, Copy, Paste, AI Copilot, Search, Save)
 - Direct external file editing & disk syncing (edits update files at their source location)
 - Drag and drop text files or snippets directly from Dolphin / file managers
-- Live Markdown split preview and rendered view (Ctrl+P)
+- Live Markdown split preview and rendered view (`Ctrl+P`)
 - Custom system fonts and code monospace mode
-- Tab pinning, double-click renaming, and search (Ctrl+K)
+- Tab pinning, double-click renaming, and search (`Ctrl+K`)
 - Real-time glassmorphism styling (opacity, corner rounding, custom theme colors)
 - Safe atomic disk writes, crash logs, and corrupt config recovery
-- Interactive bottom status bar with linked file paths and word/char count
+- Interactive bottom status bar with linked file paths, sync state, and word/char/line count
 
 ![Settings](./assets/screenshot-settings.png)
 
@@ -32,6 +35,7 @@ I built this because I wanted a lightweight popup note widget that matches my de
 - Ctrl + N : New tab
 - Ctrl + W : Close active tab
 - Ctrl + S : Save all notes / sync linked files to disk
+- Ctrl + Enter : AI Copilot & Fixer (Selection / Cursor)
 - Ctrl + K : Search notes
 - Ctrl + , : Open settings & preferences
 - Ctrl + P : Toggle Markdown preview mode (Edit / Split / Preview)

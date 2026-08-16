@@ -171,6 +171,48 @@ impl Note {
     pub fn is_linked_file(&self) -> bool {
         self.file_path.is_some()
     }
+
+    /// Returns the character count of the note's content.
+    pub fn char_len(&self) -> usize {
+        self.content.chars().count()
+    }
+
+    /// Safely extracts a substring using character offsets without UTF-8 boundary panics.
+    pub fn char_slice(&self, start_char: usize, end_char: usize) -> String {
+        let total_chars = self.char_len();
+        let s = start_char.min(total_chars);
+        let e = end_char.min(total_chars).max(s);
+        self.content.chars().skip(s).take(e - s).collect()
+    }
+
+    /// Safely replaces a character range with new text without UTF-8 boundary panics.
+    pub fn replace_char_range(&mut self, start_char: usize, end_char: usize, replacement: &str) {
+        let total_chars = self.char_len();
+        let s = start_char.min(total_chars);
+        let e = end_char.min(total_chars).max(s);
+
+        let before: String = self.content.chars().take(s).collect();
+        let after: String = self.content.chars().skip(e).collect();
+
+        let mut new_content = String::with_capacity(before.len() + replacement.len() + after.len());
+        new_content.push_str(&before);
+        new_content.push_str(replacement);
+        new_content.push_str(&after);
+
+        self.content = new_content;
+        self.update_timestamp();
+    }
+
+    /// Safely deletes a character range.
+    pub fn delete_char_range(&mut self, start_char: usize, end_char: usize) {
+        self.replace_char_range(start_char, end_char, "");
+    }
+
+    /// Safely inserts text at a character offset.
+    #[allow(dead_code)]
+    pub fn insert_at_char(&mut self, char_pos: usize, text: &str) {
+        self.replace_char_range(char_pos, char_pos, text);
+    }
 }
 
 #[cfg(test)]
@@ -190,5 +232,21 @@ mod tests {
         let mut note = Note::new("n1".to_string(), "t.txt".to_string());
         note.updated_at = "2026-08-15 14:32:05".to_string();
         assert_eq!(note.display_time(), "14:32");
+    }
+
+    #[test]
+    fn test_note_unicode_char_operations() {
+        let mut note = Note::new("u1".to_string(), "unicode.txt".to_string());
+        note.content = "// ✨ Quicky Notes — Developer Scratchpad\n// Try AI Copilot".to_string();
+
+        assert_eq!(note.char_slice(5, 11), "Quicky");
+        note.replace_char_range(5, 11, "Fast");
+        assert!(note.content.starts_with("// ✨ Fast Notes"));
+
+        note.delete_char_range(0, 5);
+        assert!(note.content.starts_with("Fast Notes"));
+
+        note.insert_at_char(0, "🚀 ");
+        assert!(note.content.starts_with("🚀 Fast Notes"));
     }
 }

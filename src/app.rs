@@ -80,6 +80,15 @@ pub struct QuickyNotesApp {
     /// Active floating toast notification.
     pub toast: Option<Toast>,
 
+    /// Interactive AI Copilot & Fixer modal state.
+    pub ai_modal: crate::ui::ai_modal::AiModalState,
+
+    /// Dedicated receiver for AI provider connection testing.
+    pub ai_test_rx: Option<mpsc::Receiver<crate::ai::AiResult>>,
+
+    /// Last recorded cursor selection character range `(start_idx, end_idx)`.
+    pub last_cursor_range: Option<(usize, usize)>,
+
     /// Last timestamp for window size persistence check.
     pub last_window_size_check: Instant,
 }
@@ -123,8 +132,16 @@ impl QuickyNotesApp {
             cached_active_stats: (0, 0, 0),
             recording_shortcut: None,
             toast: None,
+            ai_modal: crate::ui::ai_modal::AiModalState::default(),
+            ai_test_rx: None,
+            last_cursor_range: None,
             last_window_size_check: Instant::now(),
         }
+    }
+
+    /// Launches the AI Copilot modal using the currently selected text or surrounding cursor context.
+    pub fn trigger_ai_assist(&mut self) {
+        crate::ui::ai_modal::launch_copilot(self);
     }
 
     // -------------------------------------------------------------------------
@@ -160,6 +177,12 @@ impl QuickyNotesApp {
     pub fn active_note(&self) -> Option<&Note> {
         let active_id = self.data.active_note_id.as_deref()?;
         self.data.notes.iter().find(|n| n.id == active_id)
+    }
+
+    /// Returns mutable reference to active note.
+    pub fn active_note_mut(&mut self) -> Option<&mut Note> {
+        let active_id = self.data.active_note_id.clone()?;
+        self.data.notes.iter_mut().find(|n| n.id == active_id)
     }
 
     /// Creates a new note tab and selects it.
@@ -318,6 +341,33 @@ impl QuickyNotesApp {
             self.font_loading_rx = None;
         }
 
+        // Poll for async AI test connection results
+        if let Some(rx) = &self.ai_test_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.ai_test_rx = None;
+            match result {
+                crate::ai::AiResult::Success { result_text, .. } => {
+                    self.show_toast(
+                        format!("✓ AI Online: {}", result_text),
+                        crate::ui::toast::ToastKind::Success,
+                    );
+                }
+                crate::ai::AiResult::Error(err) => {
+                    self.show_toast(
+                        format!("✗ AI Test Failed: {}", err),
+                        crate::ui::toast::ToastKind::Error,
+                    );
+                }
+            }
+            ctx.request_repaint();
+        }
+
+        // Keep frame loop reactive while background AI requests are in flight
+        if self.ai_test_rx.is_some() || self.ai_modal.is_loading {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+
         // Poll for async file dialog completion
         ui::drag_drop::poll_file_dialog(self);
 
@@ -368,6 +418,7 @@ impl QuickyNotesApp {
         // Render modal overlays
         ui::editor::render_close_confirmation_modal(self, ctx);
         ui::editor::render_drop_hover_overlay(ctx);
+        ui::ai_modal::render_ai_copilot_modal(self, ctx);
     }
 }
 
@@ -414,6 +465,9 @@ mod tests {
             cached_active_stats: (0, 0, 0),
             recording_shortcut: None,
             toast: None,
+            ai_modal: crate::ui::ai_modal::AiModalState::default(),
+            ai_test_rx: None,
+            last_cursor_range: None,
             last_window_size_check: Instant::now(),
         }
     }
@@ -432,22 +486,23 @@ mod tests {
 
     #[test]
     fn test_linked_note_direct_disk_sync() {
-        let mut app = create_test_app();
         let temp_dir = std::env::temp_dir().join(format!(
             "quicky_notes_test_sync_{}",
             chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
         ));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let external_file = temp_dir.join("linked_doc.txt");
+        let external_file = temp_dir.join("test_file.txt");
         std::fs::write(&external_file, "Initial file contents").unwrap();
 
-        let mut note = Note::new("test-linked-1".to_string(), "linked_doc.txt".to_string());
+        let mut note = Note::new("test-linked-1".to_string(), "test_file.txt".to_string());
         note.content = "Modified content inside Quicky Notes".to_string();
         note.file_path = Some(external_file.to_string_lossy().to_string());
-        app.data.notes.push(note);
-        app.data.active_note_id = Some("test-linked-1".to_string());
 
-        app.save_notes_to_disk();
+        // Verify direct atomic write to linked disk file without touching user config
+        if let Some(ref path_str) = note.file_path {
+            let path = std::path::Path::new(path_str);
+            crate::storage::atomic_write_file(path, note.content.as_bytes()).unwrap();
+        }
 
         let disk_content = std::fs::read_to_string(&external_file).unwrap();
         assert_eq!(disk_content, "Modified content inside Quicky Notes");

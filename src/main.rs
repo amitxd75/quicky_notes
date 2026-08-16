@@ -3,6 +3,7 @@
 //! Entry point for initializing application settings, window options, eframe runner,
 //! and Hyprland Wayland viewport configuration.
 
+mod ai;
 mod app;
 mod components;
 mod crash;

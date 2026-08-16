@@ -223,37 +223,18 @@ impl AppData {
 
     /// Generates default initial notes for first launch.
     pub fn default_initial() -> Self {
-        let mut welcome = Note::new("note-1".to_string(), "welcome.txt".to_string());
-        welcome.content = r#"✨ Welcome to Quicky Notes!
-A blazing fast, minimal, glassmorphic scratchpad for developers.
+        let mut hello_rs = Note::new("note-1".to_string(), "hello.rs".to_string());
+        hello_rs.content = r#"// ✨ Quicky Notes — Developer Scratchpad
+// Try AI Copilot & Fixer: Select any text and press Ctrl+Enter!
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 Quick Start & Features
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Auto-Save: Everything you type is automatically saved in real-time.
-• External Files: Drag & drop any text or markdown file to edit directly.
-• Direct Sync: Saving (Ctrl+S) updates linked files at their disk location.
-• Markdown Preview: Press Ctrl+P on .md notes to toggle live split preview.
-• Dynamic Theming: Adapts to system Pywal / Caelestia wallpaper palettes.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⌨️ Essential Shortcuts
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Ctrl + N         Create new note tab
-  Ctrl + W         Close active note
-  Ctrl + S         Save all notes to disk
-  Ctrl + K         Search & browse notes
-  Ctrl + ,         Open Settings & Preferences
-  Ctrl + P         Toggle Markdown preview (.md)
-  Ctrl + Shift + E Export note to file
-  Ctrl + Tab       Switch between note tabs
-  Double-Click Tab Rename active note
-
-Built with ❤️ for speed, flow, and focus."#
-            .to_string();
+fn main() {
+    println!("Hello, World from Quicky Notes! 🚀");
+}
+"#
+        .to_string();
 
         Self {
-            notes: vec![welcome],
+            notes: vec![hello_rs],
             active_note_id: Some("note-1".to_string()),
             settings: AppSettings::default(),
         }
@@ -386,7 +367,7 @@ mod tests {
 
         let loaded = AppData::load_from_path(&path);
         assert_eq!(loaded.notes.len(), 1, "Must fall back to default notes");
-        assert_eq!(loaded.notes[0].title, "welcome.txt");
+        assert_eq!(loaded.notes[0].title, "hello.rs");
 
         // Verify a corrupt backup file was created
         let entries: Vec<_> = fs::read_dir(&dir)
