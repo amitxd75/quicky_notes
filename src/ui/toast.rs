@@ -96,7 +96,7 @@ pub fn render_floating_toast(app: &mut QuickyNotesApp, ctx: &egui::Context) {
         (230.0 * alpha_factor) as u8,
     );
 
-    let base_bottom_offset = if app.data.settings.show_status_bar && !app.show_options {
+    let base_bottom_offset = if app.data.settings.editor.show_status_bar && !app.show_options {
         -68.0
     } else {
         -36.0

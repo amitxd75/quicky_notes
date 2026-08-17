@@ -166,6 +166,31 @@ pub fn safe_open_folder(path: &Path) -> bool {
     }
 }
 
+/// Safely runs a native desktop file selection command (Zenity with Kdialog fallback).
+fn run_native_dialog(zenity_args: &[&str], kdialog_args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("zenity")
+        .args(zenity_args)
+        .output()
+        .or_else(|_| {
+            std::process::Command::new("kdialog")
+                .args(kdialog_args)
+                .output()
+        });
+
+    if let Ok(out) = output
+        && out.status.success()
+    {
+        let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !path_str.is_empty() {
+            Some(path_str)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// Spawns a native file dialog (Zenity/Kdialog) on a background thread.
 ///
 /// Returns a `Receiver` that will yield the selected file path (or `None` on cancel).
@@ -173,27 +198,7 @@ pub fn safe_open_folder(path: &Path) -> bool {
 pub fn spawn_file_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let output = std::process::Command::new("zenity")
-            .arg("--file-selection")
-            .output()
-            .or_else(|_| {
-                std::process::Command::new("kdialog")
-                    .arg("--getopenfilename")
-                    .output()
-            });
-
-        let result = if let Ok(out) = output
-            && out.status.success()
-        {
-            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                Some(path_str)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let result = run_native_dialog(&["--file-selection"], &["--getopenfilename"]);
         let _ = tx.send(result);
     });
     rx
@@ -203,29 +208,16 @@ pub fn spawn_file_dialog() -> mpsc::Receiver<Option<String>> {
 pub fn spawn_image_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let output = std::process::Command::new("zenity")
-            .arg("--file-selection")
-            .arg("--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg")
-            .output()
-            .or_else(|_| {
-                std::process::Command::new("kdialog")
-                    .arg("--getopenfilename")
-                    .arg("*.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg")
-                    .output()
-            });
-
-        let result = if let Ok(out) = output
-            && out.status.success()
-        {
-            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                Some(path_str)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let result = run_native_dialog(
+            &[
+                "--file-selection",
+                "--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg",
+            ],
+            &[
+                "--getopenfilename",
+                "*.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg",
+            ],
+        );
         let _ = tx.send(result);
     });
     rx
@@ -337,30 +329,14 @@ pub fn poll_file_dialog(app: &mut QuickyNotesApp) {
     }
 }
 
-/// Spawns a native directory selection dialog (Zenity/Kdialog) on a background thread.
+///// Spawns a native directory selection dialog (Zenity/Kdialog) on a background thread.
 pub fn spawn_folder_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let output = std::process::Command::new("zenity")
-            .arg("--file-selection")
-            .arg("--directory")
-            .output()
-            .or_else(|_| {
-                std::process::Command::new("kdialog")
-                    .arg("--getexistingdirectory")
-                    .output()
-            });
-
-        let result = if let Ok(out) = output {
-            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                Some(path_str)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let result = run_native_dialog(
+            &["--file-selection", "--directory"],
+            &["--getexistingdirectory"],
+        );
         let _ = tx.send(result);
     });
     rx
@@ -389,12 +365,11 @@ pub fn poll_folder_dialog(app: &mut QuickyNotesApp) {
 
     app.folder_dialog_rx = None;
 
-    if let Some(Some(path_str)) = result {
-        let path = std::path::Path::new(&path_str);
-        if is_safe_file_path(path) && path.is_dir() {
-            app.open_folder_workspace(path);
-        } else {
-            app.set_status("Folder path not allowed or not found");
+    if let Some(Some(dir_str)) = result {
+        let path = std::path::PathBuf::from(&dir_str);
+        if path.is_dir() {
+            app.open_folder_workspace(&path);
+            app.set_status(format!("Opened folder workspace: {}", dir_str));
         }
     }
 }
@@ -472,29 +447,19 @@ pub fn spawn_export_dialog(
 
         let initial_str = initial_path.to_string_lossy().to_string();
 
-        // 1. Try native file save dialog via zenity or kdialog
-        let output = std::process::Command::new("zenity")
-            .arg("--file-selection")
-            .arg("--save")
-            .arg("--confirm-overwrite")
-            .arg(format!("--filename={}", initial_str))
-            .output()
-            .or_else(|_| {
-                std::process::Command::new("kdialog")
-                    .arg("--getsavefilename")
-                    .arg(&initial_str)
-                    .output()
-            });
+        let filename_arg = format!("--filename={}", initial_str);
+        let chosen_opt = run_native_dialog(
+            &[
+                "--file-selection",
+                "--save",
+                "--confirm-overwrite",
+                &filename_arg,
+            ],
+            &["--getsavefilename", &initial_str],
+        );
 
-        let target_path = match output {
-            Ok(out) if out.status.success() => {
-                let chosen = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !chosen.is_empty() {
-                    std::path::PathBuf::from(chosen)
-                } else {
-                    initial_path
-                }
-            }
+        let target_path = match chosen_opt {
+            Some(chosen) if !chosen.is_empty() => std::path::PathBuf::from(chosen),
             _ => initial_path,
         };
 
@@ -586,6 +551,124 @@ pub fn export_active_note(app: &mut QuickyNotesApp) {
 
         app.export_dialog_rx = Some(spawn_export_dialog(filename, is_qn, binary, text));
         app.set_status("Select destination to export note...");
+    }
+}
+
+/// Spawns an export settings save dialog on a background thread.
+pub fn export_settings(app: &mut QuickyNotesApp) {
+    if app.export_settings_rx.is_some() {
+        return;
+    }
+    let json_text = match serde_json::to_string_pretty(&app.data.settings) {
+        Ok(j) => j,
+        Err(e) => {
+            app.show_toast(format!("Serialization error: {}", e), ToastKind::Error);
+            return;
+        }
+    };
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = if let Some(path_str) = run_native_dialog(
+            &[
+                "--file-selection",
+                "--save",
+                "--confirm-overwrite",
+                "--filename=quicky_settings.json",
+                "--file-filter=JSON Config | *.json",
+            ],
+            &["--getsavefilename", "quicky_settings.json", "*.json"],
+        ) {
+            if let Err(e) = std::fs::write(&path_str, json_text) {
+                Err(format!("Save failed: {}", e))
+            } else {
+                Ok(path_str)
+            }
+        } else {
+            Err("Export cancelled".to_string())
+        };
+        let _ = tx.send(result);
+    });
+    app.export_settings_rx = Some(rx);
+    app.set_status("Select location to export settings JSON...");
+}
+
+/// Spawns an import settings open dialog on a background thread.
+pub fn import_settings(app: &mut QuickyNotesApp) {
+    if app.import_settings_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = if let Some(path_str) = run_native_dialog(
+            &["--file-selection", "--file-filter=JSON Config | *.json"],
+            &["--getopenfilename", "*.json"],
+        ) {
+            match std::fs::read_to_string(&path_str) {
+                Ok(json) => Ok(json),
+                Err(e) => Err(format!("Read failed: {}", e)),
+            }
+        } else {
+            Err("Import cancelled".to_string())
+        };
+        let _ = tx.send(result);
+    });
+    app.import_settings_rx = Some(rx);
+    app.set_status("Select settings JSON file to import...");
+}
+
+/// Polls for completed settings import/export background dialogs.
+pub fn poll_settings_dialogs(app: &mut QuickyNotesApp, ctx: &egui::Context) {
+    if let Some(rx) = &app.export_settings_rx {
+        match rx.try_recv() {
+            Ok(Ok(path)) => {
+                app.export_settings_rx = None;
+                app.show_toast(format!("Settings exported to {}", path), ToastKind::Success);
+                app.set_status("Settings exported ✓");
+            }
+            Ok(Err(err)) => {
+                app.export_settings_rx = None;
+                if !err.contains("cancelled") {
+                    app.show_toast(err, ToastKind::Error);
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                app.export_settings_rx = None;
+            }
+        }
+    }
+
+    if let Some(rx) = &app.import_settings_rx {
+        match rx.try_recv() {
+            Ok(Ok(json)) => {
+                app.import_settings_rx = None;
+                match serde_json::from_str::<crate::models::AppSettings>(&json) {
+                    Ok(mut loaded) => {
+                        loaded.validate_and_clamp();
+                        app.data.settings = loaded;
+                        crate::theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+                        app.is_dirty = true;
+                        let _ = app.data.save();
+                        app.show_toast("Settings imported successfully ✓", ToastKind::Success);
+                        app.set_status("Settings imported");
+                        ctx.request_repaint();
+                    }
+                    Err(e) => {
+                        app.show_toast(format!("Invalid settings JSON: {}", e), ToastKind::Error);
+                    }
+                }
+            }
+            Ok(Err(err)) => {
+                app.import_settings_rx = None;
+                if !err.contains("cancelled") {
+                    app.show_toast(err, ToastKind::Error);
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                app.import_settings_rx = None;
+            }
+        }
     }
 }
 

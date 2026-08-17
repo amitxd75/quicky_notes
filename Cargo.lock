@@ -3421,7 +3421,7 @@ dependencies = [
 
 [[package]]
 name = "quicky_notes"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "arboard",
  "chrono",

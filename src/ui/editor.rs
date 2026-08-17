@@ -45,7 +45,7 @@ pub fn render_main_editor(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mu
             ui::draw_horizontal_divider(ui);
 
             // 2. Exact calculation of body vs status bar heights without overflow
-            let show_status_bar = !app.show_options && app.data.settings.show_status_bar;
+            let show_status_bar = !app.show_options && app.data.settings.editor.show_status_bar;
             let status_bar_height = if show_status_bar {
                 STATUS_BAR_HEIGHT
             } else {
@@ -93,12 +93,12 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
         let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_y.abs() > 0.5 {
             let delta = if scroll_y > 0.0 { 0.5 } else { -0.5 };
-            let new_size = (app.data.settings.font_size + delta).clamp(
+            let new_size = (app.data.settings.editor.font_size + delta).clamp(
                 crate::models::settings::MIN_FONT_SIZE,
                 crate::models::settings::MAX_FONT_SIZE,
             );
-            if (new_size - app.data.settings.font_size).abs() > 0.01 {
-                app.data.settings.font_size = new_size;
+            if (new_size - app.data.settings.editor.font_size).abs() > 0.01 {
+                app.data.settings.editor.font_size = new_size;
                 app.set_status(format!("Zoom: {:.1}pt", new_size));
                 app.is_dirty = true;
                 let _ = crate::storage::AppData::save_settings_to_path(
@@ -109,16 +109,16 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
         }
     }
 
-    let font_size = app.data.settings.font_size;
-    let is_monospace = app.data.settings.monospace_font;
+    let font_size = app.data.settings.editor.font_size;
+    let is_monospace = app.data.settings.editor.monospace_font;
     let preview_mode = app.preview_mode;
     let should_focus = app.focus_editor;
     app.focus_editor = false;
 
     let palette = theme::get_palette(&app.data.settings);
-    let enable_ghost_text = app.data.settings.enable_ghost_text;
-    let show_line_numbers = app.data.settings.show_line_numbers;
-    let enable_syntax = app.data.settings.enable_syntax_highlighting;
+    let enable_ghost_text = app.data.settings.editor.enable_ghost_text;
+    let show_line_numbers = app.data.settings.editor.show_line_numbers;
+    let enable_syntax = app.data.settings.editor.enable_syntax_highlighting;
     let line_count = app.cached_active_stats.2;
     let mut content_changed = false;
     let mut context_menu_action: Option<crate::ui::context_menu::ContextMenuAction> = None;
@@ -629,7 +629,7 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         }
 
                         // 2. Interactive Language / Monospace indicator (Click to toggle font)
-                        let font_label = if app.data.settings.monospace_font {
+                        let font_label = if app.data.settings.editor.monospace_font {
                             "Mono"
                         } else {
                             "Sans"
@@ -637,7 +637,7 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         let font_resp = ui.add(
                             egui::Label::new(
                                 RichText::new(font_label)
-                                    .font(if app.data.settings.monospace_font {
+                                    .font(if app.data.settings.editor.monospace_font {
                                         FontId::monospace(11.0)
                                     } else {
                                         FontId::proportional(11.5)
@@ -648,18 +648,18 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         );
                         let font_tooltip = format!(
                             "Font Family: {}\n• Click to toggle between Monospace and Proportional font",
-                            if app.data.settings.monospace_font {
+                            if app.data.settings.editor.monospace_font {
                                 "Monospace"
                             } else {
                                 "Proportional"
                             }
                         );
                         if font_resp.on_hover_text(font_tooltip).clicked() {
-                            app.data.settings.monospace_font = !app.data.settings.monospace_font;
+                            app.data.settings.editor.monospace_font = !app.data.settings.editor.monospace_font;
                             app.is_dirty = true;
                             app.set_status(format!(
                                 "Font: {}",
-                                if app.data.settings.monospace_font {
+                                if app.data.settings.editor.monospace_font {
                                     "Monospace"
                                 } else {
                                     "Proportional"
@@ -835,7 +835,7 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         if !is_compact {
                             let tab_resp = ui.add(
                                 egui::Label::new(
-                                    RichText::new(format!("Tab: {} sp", app.data.settings.tab_size))
+                                    RichText::new(format!("Tab: {} sp", app.data.settings.editor.tab_size))
                                         .font(FontId::proportional(11.5))
                                         .color(Color32::from_gray(170)),
                                 )
@@ -843,17 +843,17 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             );
                             let tab_tooltip = format!(
                                 "Tab Indentation: {} spaces\n• Click to cycle tab size (2, 4, 8)\n• Right-click for options",
-                                app.data.settings.tab_size
+                                app.data.settings.editor.tab_size
                             );
                             let tab_resp = tab_resp.on_hover_text(tab_tooltip);
 
                             if tab_resp.clicked() {
-                                let new_size = match app.data.settings.tab_size {
+                                let new_size = match app.data.settings.editor.tab_size {
                                     2 => 4,
                                     4 => 8,
                                     _ => 2,
                                 };
-                                app.data.settings.tab_size = new_size;
+                                app.data.settings.editor.tab_size = new_size;
                                 app.is_dirty = true;
                                 app.set_status(format!("Tab size: {} spaces", new_size));
                             }
@@ -862,12 +862,12 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                                 for sz in [2, 4, 8] {
                                     if ui
                                         .selectable_label(
-                                            app.data.settings.tab_size == sz,
+                                            app.data.settings.editor.tab_size == sz,
                                             format!("{} Spaces", sz),
                                         )
                                         .clicked()
                                     {
-                                        app.data.settings.tab_size = sz;
+                                        app.data.settings.editor.tab_size = sz;
                                         app.is_dirty = true;
                                         ui.close();
                                     }

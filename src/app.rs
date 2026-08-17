@@ -71,6 +71,12 @@ pub struct QuickyNotesApp {
     /// Receiver for async file export dialog results.
     pub export_dialog_rx: Option<mpsc::Receiver<Result<String, String>>>,
 
+    /// Receiver for async settings JSON export dialog results.
+    pub export_settings_rx: Option<mpsc::Receiver<Result<String, String>>>,
+
+    /// Receiver for async settings JSON import dialog results.
+    pub import_settings_rx: Option<mpsc::Receiver<Result<String, String>>>,
+
     /// Receiver for async font loading results.
     pub font_loading_rx: Option<mpsc::Receiver<egui::FontDefinitions>>,
 
@@ -134,13 +140,14 @@ impl QuickyNotesApp {
         theme::setup_glassmorphism_theme(&cc.egui_ctx, &data.settings);
         let initial_colors = theme::get_wallpaper_colors();
 
-        if data.settings.always_on_top {
+        if data.settings.window.always_on_top {
             cc.egui_ctx
                 .send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
         }
 
         // Load fonts asynchronously on a background thread to avoid startup delay
-        let font_rx = crate::font::setup_fonts_async(&cc.egui_ctx, &data.settings.selected_font);
+        let font_rx =
+            crate::font::setup_fonts_async(&cc.egui_ctx, &data.settings.appearance.selected_font);
 
         // Pre-index existing notes and load dictionary asynchronously
         let note_texts = data.notes.iter().map(|n| n.content.clone()).collect();
@@ -166,6 +173,8 @@ impl QuickyNotesApp {
             is_dirty: false,
             file_dialog_rx: None,
             export_dialog_rx: None,
+            export_settings_rx: None,
+            import_settings_rx: None,
             font_loading_rx: Some(font_rx),
 
             cached_active_stats: (0, 0, 0),
@@ -288,12 +297,14 @@ impl QuickyNotesApp {
     pub fn create_new_note(&mut self) {
         let count = self.data.notes.len() + 1;
         let id = format!("note-{}", chrono::Local::now().timestamp_millis());
-        let ext = if self.data.settings.default_extension.starts_with('.') {
-            &self.data.settings.default_extension
+        let ext = if self.data.settings.editor.default_extension.starts_with('.') {
+            &self.data.settings.editor.default_extension
         } else {
             ".txt"
         };
-        let title = format!("note_{}{}", count, ext);
+        let prefix = self.data.settings.general.default_title_prefix.trim();
+        let prefix = if prefix.is_empty() { "note" } else { prefix };
+        let title = format!("{}_{}{}", prefix, count, ext);
         let note = Note::new(id.clone(), title);
         self.data.notes.push(note);
         self.data.active_note_id = Some(id);
@@ -307,7 +318,7 @@ impl QuickyNotesApp {
         if let Some(note) = self.data.notes.iter().find(|n| n.id == id) {
             // Linked disk files or notes without unsaved custom content close immediately without modal darkening
             if note.file_path.is_some()
-                || !self.data.settings.confirm_close_tab
+                || !self.data.settings.editor.confirm_close_tab
                 || note.content.trim().is_empty()
             {
                 self.close_note(id);
@@ -321,7 +332,7 @@ impl QuickyNotesApp {
     pub fn close_note(&mut self, id: &str) {
         if self.data.notes.len() <= 1 {
             if let Some(note) = self.data.notes.first_mut() {
-                let ext = &self.data.settings.default_extension;
+                let ext = &self.data.settings.editor.default_extension;
                 note.title = format!("untitled{}", ext);
                 note.content.clear();
                 note.file_path = None;
@@ -371,14 +382,14 @@ impl QuickyNotesApp {
         if self.data.notes.is_empty() {
             let note = Note::new(
                 "default".to_string(),
-                format!("note_1{}", self.data.settings.default_extension),
+                format!("note_1{}", self.data.settings.editor.default_extension),
             );
             self.data.active_note_id = Some("default".to_string());
             self.data.notes.push(note);
         }
 
         // Automatic trailing whitespace trimming on manual Ctrl+S
-        if force && self.data.settings.trim_trailing_whitespace {
+        if force && self.data.settings.editor.trim_trailing_whitespace {
             for note in &mut self.data.notes {
                 let trimmed: String = note
                     .content
@@ -517,6 +528,7 @@ impl QuickyNotesApp {
         ui::drag_drop::poll_file_dialog(self);
         ui::drag_drop::poll_folder_dialog(self);
         ui::drag_drop::poll_export_dialog(self);
+        ui::drag_drop::poll_settings_dialogs(self, ctx);
 
         ui::drag_drop::handle_dropped_files(self, ctx);
         ui::shortcuts::handle_keyboard_shortcuts(self, ctx);
@@ -526,14 +538,14 @@ impl QuickyNotesApp {
 
         // Defense-in-depth guard against zero auto_save_seconds
         if self.last_auto_save.elapsed()
-            > Duration::from_secs(self.data.settings.auto_save_seconds.max(1) as u64)
+            > Duration::from_secs(self.data.settings.editor.auto_save_seconds.max(1) as u64)
         {
             self.save_if_dirty();
             self.last_auto_save = Instant::now();
         }
 
         // Real-time wallpaper theme sync (polls Caelestia/Pywal every 1s with mtime caching)
-        if self.data.settings.theme_mode == theme::ThemeMode::WallpaperSync
+        if self.data.settings.appearance.theme_mode == theme::ThemeMode::WallpaperSync
             && self.last_wallpaper_check.elapsed() > Duration::from_secs(1)
         {
             self.last_wallpaper_check = Instant::now();
@@ -549,11 +561,11 @@ impl QuickyNotesApp {
             if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
                 let new_w = rect.width();
                 let new_h = rect.height();
-                if (new_w - self.data.settings.window_width).abs() > 1.0
-                    || (new_h - self.data.settings.window_height).abs() > 1.0
+                if (new_w - self.data.settings.window.width).abs() > 1.0
+                    || (new_h - self.data.settings.window.height).abs() > 1.0
                 {
-                    self.data.settings.window_width = new_w;
-                    self.data.settings.window_height = new_h;
+                    self.data.settings.window.width = new_w;
+                    self.data.settings.window.height = new_h;
                     self.is_dirty = true;
                 }
             }
@@ -618,6 +630,8 @@ mod tests {
             is_dirty: false,
             file_dialog_rx: None,
             export_dialog_rx: None,
+            export_settings_rx: None,
+            import_settings_rx: None,
             font_loading_rx: None,
 
             cached_active_stats: (0, 0, 0),

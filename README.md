@@ -65,15 +65,14 @@ quicky --sidebar ~/projects/my_project
 | `Ctrl + Space` | Open AI Copilot |
 | `Tab` | Accept Ghost Autocomplete |
 
-## Hyprland Configuration (Lua)
+## Window Manager & Desktop Integration
 
+### Hyprland (Lua)
 ```lua
--- Keybinding
+-- ~/.config/hypr/hyprland.lua
 hl.bind("SUPER + N", hl.dsp.exec_cmd("quicky"), { desc = "Toggle Quicky Notes" })
-
--- Window Rule
 hl.rule({
-    class = "quicky",
+    class = "quicky_notes",
     float = true,
     center = true,
     size = { 860, 600 },

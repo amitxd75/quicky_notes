@@ -7,9 +7,10 @@ use eframe::egui::{Color32, CornerRadius, FontId, Frame, Margin, RichText, Strok
 /// Creates a main glass editor outer frame with translucent background and accent border.
 pub fn glass_editor_frame(settings: &AppSettings) -> Frame {
     let palette = theme::get_palette(settings);
-    let blur_factor = settings.blur_strength.clamp(0.0, 1.0);
-    let alpha = (settings.opacity * 255.0 * (0.85 + 0.15 * blur_factor)).clamp(40.0, 255.0) as u8;
-    let radius = settings.corner_radius.round().clamp(0.0, 32.0) as u8;
+    let blur_factor = settings.appearance.blur_strength.clamp(0.0, 1.0);
+    let alpha = (settings.appearance.opacity * 255.0 * (0.85 + 0.15 * blur_factor))
+        .clamp(40.0, 255.0) as u8;
+    let radius = settings.appearance.corner_radius.round().clamp(0.0, 32.0) as u8;
     let border_stroke = 1.0 + 0.4 * blur_factor;
 
     Frame::NONE
@@ -28,8 +29,9 @@ pub fn glass_editor_frame(settings: &AppSettings) -> Frame {
 #[allow(dead_code)]
 pub fn glass_card_frame(settings: &AppSettings) -> Frame {
     let palette = theme::get_palette(settings);
-    let blur_factor = settings.blur_strength.clamp(0.0, 1.0);
-    let alpha = (settings.opacity * 255.0 * (0.85 + 0.15 * blur_factor)).clamp(140.0, 245.0) as u8;
+    let blur_factor = settings.appearance.blur_strength.clamp(0.0, 1.0);
+    let alpha = (settings.appearance.opacity * 255.0 * (0.85 + 0.15 * blur_factor))
+        .clamp(140.0, 245.0) as u8;
     let border_stroke = 1.0 + 0.3 * blur_factor;
 
     Frame::NONE
@@ -79,8 +81,8 @@ pub fn settings_card<R>(
 /// Creates a solid outer header container bar frame.
 pub fn glass_header_frame(settings: &AppSettings) -> Frame {
     let palette = theme::get_palette(settings);
-    let blur_factor = settings.blur_strength.clamp(0.0, 1.0);
-    let border_alpha = (100.0 + 80.0 * blur_factor).clamp(60.0, 255.0) as u8;
+    let blur_factor = settings.appearance.blur_strength.clamp(0.0, 1.0);
+    let border_alpha = (100.0_f32 + 80.0_f32 * blur_factor).clamp(60.0, 255.0) as u8;
 
     Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
@@ -104,7 +106,7 @@ pub fn glass_header_frame(settings: &AppSettings) -> Frame {
 /// Creates a search/input container frame.
 pub fn glass_input_frame(settings: &AppSettings) -> Frame {
     let palette = theme::get_palette(settings);
-    let blur_factor = settings.blur_strength.clamp(0.0, 1.0);
+    let blur_factor = settings.appearance.blur_strength.clamp(0.0, 1.0);
 
     Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(

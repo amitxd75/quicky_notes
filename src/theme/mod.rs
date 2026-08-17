@@ -441,47 +441,47 @@ pub fn check_wallpaper_color_change(last_colors: &mut Option<PaletteColors>) -> 
 
 /// Resolves theme palette colors according to user settings.
 pub fn get_palette(settings: &AppSettings) -> PaletteColors {
-    match settings.theme_mode {
+    match settings.appearance.theme_mode {
         ThemeMode::Custom => PaletteColors::with_semantic(
             Color32::from_rgb(
-                settings.custom_bg_color[0],
-                settings.custom_bg_color[1],
-                settings.custom_bg_color[2],
+                settings.appearance.custom_colors.bg[0],
+                settings.appearance.custom_colors.bg[1],
+                settings.appearance.custom_colors.bg[2],
             ),
             Color32::from_rgb(
-                settings.custom_card_color[0],
-                settings.custom_card_color[1],
-                settings.custom_card_color[2],
+                settings.appearance.custom_colors.card[0],
+                settings.appearance.custom_colors.card[1],
+                settings.appearance.custom_colors.card[2],
             ),
             Color32::from_rgb(
-                settings.custom_border_color[0],
-                settings.custom_border_color[1],
-                settings.custom_border_color[2],
+                settings.appearance.custom_colors.border[0],
+                settings.appearance.custom_colors.border[1],
+                settings.appearance.custom_colors.border[2],
             ),
             Color32::from_rgb(
-                settings.custom_accent_color[0],
-                settings.custom_accent_color[1],
-                settings.custom_accent_color[2],
+                settings.appearance.custom_colors.accent[0],
+                settings.appearance.custom_colors.accent[1],
+                settings.appearance.custom_colors.accent[2],
             ),
             Color32::from_rgb(
-                settings.custom_secondary_accent_color[0],
-                settings.custom_secondary_accent_color[1],
-                settings.custom_secondary_accent_color[2],
+                settings.appearance.custom_colors.secondary_accent[0],
+                settings.appearance.custom_colors.secondary_accent[1],
+                settings.appearance.custom_colors.secondary_accent[2],
             ),
             Color32::from_rgb(
-                settings.custom_text_color[0],
-                settings.custom_text_color[1],
-                settings.custom_text_color[2],
+                settings.appearance.custom_colors.text[0],
+                settings.appearance.custom_colors.text[1],
+                settings.appearance.custom_colors.text[2],
             ),
             Color32::from_rgb(
-                settings.custom_muted_text_color[0],
-                settings.custom_muted_text_color[1],
-                settings.custom_muted_text_color[2],
+                settings.appearance.custom_colors.muted_text[0],
+                settings.appearance.custom_colors.muted_text[1],
+                settings.appearance.custom_colors.muted_text[2],
             ),
             Color32::from_rgb(
-                settings.custom_danger_color[0],
-                settings.custom_danger_color[1],
-                settings.custom_danger_color[2],
+                settings.appearance.custom_colors.danger[0],
+                settings.appearance.custom_colors.danger[1],
+                settings.appearance.custom_colors.danger[2],
             ),
         ),
         ThemeMode::WallpaperSync => {
@@ -544,8 +544,8 @@ pub fn get_palette(settings: &AppSettings) -> PaletteColors {
 /// Applies glassmorphism visual styles to egui context without touching font definitions.
 pub fn setup_glassmorphism_theme(ctx: &Context, settings: &AppSettings) {
     let palette = get_palette(settings);
-    let alpha = (settings.opacity * 255.0).clamp(40.0, 255.0) as u8;
-    let radius = settings.corner_radius.round().clamp(0.0, 32.0) as u8;
+    let alpha = (settings.appearance.opacity * 255.0).clamp(40.0, 255.0) as u8;
+    let radius = settings.appearance.corner_radius.round().clamp(0.0, 32.0) as u8;
 
     let mut visuals = Visuals::dark();
 

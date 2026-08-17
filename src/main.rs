@@ -1,7 +1,7 @@
-//! Quicky Notes - Floating glassmorphism note widget for Hyprland & Wayland desktops.
+//! Quicky Notes - Floating glassmorphism note widget and code scratchpad for Linux.
 //!
 //! Entry point for initializing application settings, window options, eframe runner,
-//! and Hyprland Wayland viewport configuration.
+//! and Wayland / X11 desktop viewport configuration.
 
 mod app;
 pub mod components;
@@ -56,8 +56,8 @@ fn main() -> Result<(), eframe::Error> {
     }
 
     let data = storage::AppData::load();
-    let width = data.settings.window_width;
-    let height = data.settings.window_height;
+    let width = data.settings.window.width;
+    let height = data.settings.window.height;
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Quicky Notes")
@@ -80,6 +80,7 @@ fn main() -> Result<(), eframe::Error> {
         "Quicky Notes",
         options,
         Box::new(move |cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
             Ok(Box::new(QuickyNotesApp::new_with_data_and_cli(
                 cc, data, cli,
             )))

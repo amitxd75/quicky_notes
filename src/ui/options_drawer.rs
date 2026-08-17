@@ -119,12 +119,16 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
 
                             match app.settings_tab {
                                 SettingsTab::General => {
-                                    render_general_core_card(app, ctx, ui, &palette);
-                                    render_quick_actions_card(app, ui, &palette);
+                                    render_general_system_card(app, ctx, ui, &palette);
+                                    render_general_workspace_card(app, ctx, ui, &palette);
+                                    render_general_sync_card(app, ctx, ui, &palette);
+                                    render_general_cheatsheet_card(ui, &palette);
                                 }
                                 SettingsTab::Appearance => {
                                     render_theme_palette_card(app, ctx, ui, &palette);
-                                    if app.data.settings.theme_mode == theme::ThemeMode::Custom {
+                                    if app.data.settings.appearance.theme_mode
+                                        == theme::ThemeMode::Custom
+                                    {
                                         render_ai_theme_generator_card(app, ctx, ui, &palette);
                                         render_custom_colors_card(app, ctx, ui, &palette);
                                     }
@@ -140,7 +144,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                                     render_ai_settings_card(app, ctx, ui, &palette);
                                 }
                                 SettingsTab::FilesBackup => {
-                                    render_backup_info_card(ui, &palette);
+                                    render_backup_info_card(app, ctx, ui, &palette);
                                     render_learned_dictionary_card(app, ctx, ui, &palette);
                                     render_quick_actions_card(app, ui, &palette);
                                 }
@@ -265,24 +269,60 @@ fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
     });
 }
 
-/// Renders the essential, high-priority core settings in the General tab.
-fn render_general_core_card(
+/// Renders System & Startup integration card in the General tab.
+fn render_general_system_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
     palette: &theme::Palette,
 ) {
-    card::settings_card(ui, "GENERAL & WORKSPACE ESSENTIALS", palette, |ui| {
-        // 1. Always on Top (Floating Mode)
+    card::settings_card(ui, "SYSTEM & STARTUP INTEGRATION", palette, |ui| {
+        // 1. Launch on System Startup (Autostart)
         if toggle::toggle_row(
             ui,
-            "Always on Top (Floating Widget)",
-            &mut app.data.settings.always_on_top,
+            "Launch on System Startup (Autostart)",
+            &mut app.data.settings.general.autostart,
             palette.accent,
         )
         .changed()
         {
-            let level = if app.data.settings.always_on_top {
+            let _ =
+                crate::platform::sync_autostart_desktop_file(app.data.settings.general.autostart);
+            app.is_dirty = true;
+            if app.data.settings.general.autostart {
+                app.show_toast(
+                    "Autostart enabled (~/.config/autostart/quicky.desktop)",
+                    crate::ui::toast::ToastKind::Success,
+                );
+            } else {
+                app.show_toast("Autostart disabled", crate::ui::toast::ToastKind::Info);
+            }
+            ctx.request_repaint();
+        }
+
+        // 2. Restore Session on Startup
+        if toggle::toggle_row(
+            ui,
+            "Restore Open Session & Workspace on Startup",
+            &mut app.data.settings.general.restore_session,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 3. Always on Top (Floating Widget)
+        if toggle::toggle_row(
+            ui,
+            "Always on Top (Floating Scratchpad Mode)",
+            &mut app.data.settings.window.always_on_top,
+            palette.accent,
+        )
+        .changed()
+        {
+            let level = if app.data.settings.window.always_on_top {
                 egui::WindowLevel::AlwaysOnTop
             } else {
                 egui::WindowLevel::Normal
@@ -291,12 +331,41 @@ fn render_general_core_card(
             app.is_dirty = true;
             ctx.request_repaint();
         }
+    });
+}
 
-        // 2. Ghost Writing Predictive Autocomplete
+/// Renders Note Defaults & Automation settings card in the General tab.
+fn render_general_workspace_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    card::settings_card(ui, "NOTE CREATION & DEFAULTS", palette, |ui| {
+        // 1. Default New Note Title Prefix
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("New Note Title Prefix:")
+                    .font(FontId::proportional(12.5))
+                    .color(Color32::from_gray(230)),
+            );
+            let prefix_edit =
+                egui::TextEdit::singleline(&mut app.data.settings.general.default_title_prefix)
+                    .font(FontId::monospace(12.0))
+                    .desired_width(ui.available_width());
+            if ui.add(prefix_edit).changed() {
+                app.data.settings.general.validate_and_clamp();
+                app.is_dirty = true;
+            }
+        });
+
+        ui.add_space(4.0);
+
+        // 2. Auto-Title from First Line
         if toggle::toggle_row(
             ui,
-            "Ghost Writing Autocomplete (Tab)",
-            &mut app.data.settings.enable_ghost_text,
+            "Auto-Title Notes from First Line",
+            &mut app.data.settings.general.auto_title_from_first_line,
             palette.accent,
         )
         .changed()
@@ -305,34 +374,8 @@ fn render_general_core_card(
             ctx.request_repaint();
         }
 
-        // 3. Real-time Syntax Highlighting
-        if toggle::toggle_row(
-            ui,
-            "Code & Markdown Syntax Colors",
-            &mut app.data.settings.enable_syntax_highlighting,
-            palette.accent,
-        )
-        .changed()
-        {
-            app.is_dirty = true;
-            ctx.request_repaint();
-        }
-
-        // 4. Show Line Numbers
-        if toggle::toggle_row(
-            ui,
-            "Show Line Numbers in Gutter",
-            &mut app.data.settings.show_line_numbers,
-            palette.accent,
-        )
-        .changed()
-        {
-            app.is_dirty = true;
-            ctx.request_repaint();
-        }
-
-        // 5. Default New Note Extension
-        let mut ext = app.data.settings.default_extension.clone();
+        // 3. Default File Format Extension
+        let mut ext = app.data.settings.editor.default_extension.clone();
         if button::selection_row(
             ui,
             "Default Note Format",
@@ -344,7 +387,7 @@ fn render_general_core_card(
             ],
             palette,
         ) {
-            app.data.settings.default_extension = ext;
+            app.data.settings.editor.default_extension = ext;
             app.is_dirty = true;
             let _ = crate::storage::AppData::save_settings_to_path(
                 &app.data.settings,
@@ -353,36 +396,127 @@ fn render_general_core_card(
             ctx.request_repaint();
         }
 
-        // 6. Tab Indentation Width
-        if button::selection_row(
+        // 4. Confirm Before Closing Note Tab
+        if toggle::toggle_row(
             ui,
-            "Tab Indentation Width",
-            &mut app.data.settings.tab_size,
-            [("2 sp", 2), ("4 sp", 4), ("8 sp", 8)],
-            palette,
-        ) {
-            app.is_dirty = true;
-            ctx.request_repaint();
-        }
-
-        // 7. Window Opacity Slider
-        let opacity_pct = (app.data.settings.opacity * 100.0) as u32;
-        let opacity_str = format!("{}%", opacity_pct);
-        if slider::slider_row(
-            ui,
-            "Window Opacity",
-            &opacity_str,
-            &mut app.data.settings.opacity,
-            0.15..=1.0,
+            "Confirm Before Closing Unsaved Note",
+            &mut app.data.settings.editor.confirm_close_tab,
             palette.accent,
         )
         .changed()
         {
-            app.data.settings.validate_and_clamp();
-            theme::setup_glassmorphism_theme(ctx, &app.data.settings);
             app.is_dirty = true;
             ctx.request_repaint();
         }
+    });
+}
+
+/// Renders Workspace Sync & Text Automation card in the General tab.
+fn render_general_sync_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    card::settings_card(ui, "LIVE SYNC & TEXT INTEGRATION", palette, |ui| {
+        // 1. Live Disk Sync
+        if toggle::toggle_row(
+            ui,
+            "Live External Disk Sync (External file reload)",
+            &mut app.data.settings.general.live_disk_sync,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 2. Dynamic Wallpaper Theme Sync
+        if toggle::toggle_row(
+            ui,
+            "Dynamic Wallpaper Color Sync (Pywal/Caelestia)",
+            &mut app.data.settings.general.auto_sync_wallpaper,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 3. Auto-close brackets, quotes, backticks
+        if toggle::toggle_row(
+            ui,
+            "Auto-Close Paired Brackets & Markdown Quotes",
+            &mut app.data.settings.general.auto_close_brackets,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 4. Strip ANSI escape sequences on paste
+        if toggle::toggle_row(
+            ui,
+            "Strip Terminal ANSI Colors on Paste",
+            &mut app.data.settings.general.strip_ansi_on_paste,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        ui.add_space(4.0);
+        let reset_general_btn = button::animated_action_button(
+            ui,
+            "↺ Reset General Settings to Defaults",
+            palette,
+            egui::vec2(ui.available_width(), 28.0),
+        );
+        if reset_general_btn.clicked() {
+            app.data.settings.general = crate::models::settings::GeneralSettings::default();
+            app.data.settings.validate_and_clamp();
+            app.is_dirty = true;
+            app.show_toast(
+                "General settings reset to defaults",
+                crate::ui::toast::ToastKind::Info,
+            );
+            ctx.request_repaint();
+        }
+    });
+}
+
+/// Renders Window Manager & CLI quick cheatsheet in the General tab.
+fn render_general_cheatsheet_card(ui: &mut Ui, palette: &theme::Palette) {
+    card::settings_card(ui, "⚡ GLOBAL SCRATCHPAD & CLI QUICKSTART", palette, |ui| {
+        ui.label(
+            RichText::new(
+                "Launch Quicky as a global drop-down scratchpad across any Linux desktop:",
+            )
+            .font(FontId::proportional(11.5))
+            .color(Color32::from_gray(200)),
+        );
+
+        ui.add_space(4.0);
+
+        ui.label(
+            RichText::new("✦ Hyprland Lua (~/.config/hypr/hyprland.lua):\n   hl.bind({ \"SUPER\" }, \"N\", \"exec\", \"quicky\")\n   hl.rule(\"float, class:^(quicky_notes)$\")\n   hl.rule(\"pin, class:^(quicky_notes)$\")\n\n✦ Sway / i3 (~/.config/sway/config):\n   bindsym $mod+n exec quicky\n   for_window [app_id=\"quicky_notes\"] floating enable, sticky enable\n\n✦ Niri (~/.config/niri/config.kdl):\n   binds { Mod+N { spawn \"quicky\"; } }\n\n✦ KDE Plasma / GNOME / XFCE:\n   System Settings → Custom Shortcuts → Add Shortcut → Command: quicky")
+                .font(FontId::monospace(10.5))
+                .color(palette.accent),
+        );
+
+        ui.add_space(4.0);
+
+        ui.label(
+            RichText::new("✦ CLI Launch Commands:\n   quicky                  # Open default scratchpad\n   quicky -f <folder>      # Open folder workspace tree\n   quicky <file.md>        # Open specific note file\n   quicky --new            # Open clean new note tab")
+                .font(FontId::monospace(10.5))
+                .color(Color32::from_gray(210)),
+        );
     });
 }
 
@@ -488,9 +622,9 @@ fn render_theme_palette_card(
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
             for mode in theme::ThemeMode::all_modes() {
-                let is_selected = app.data.settings.theme_mode == *mode;
+                let is_selected = app.data.settings.appearance.theme_mode == *mode;
                 if button::selection_pill(ui, mode.display_name(), is_selected, palette).clicked() {
-                    app.data.settings.theme_mode = *mode;
+                    app.data.settings.appearance.theme_mode = *mode;
                     theme::setup_glassmorphism_theme(ctx, &app.data.settings);
                     app.is_dirty = true;
                     ctx.request_repaint();
@@ -534,13 +668,13 @@ fn render_custom_colors_card(
             color_changed |= color_picker_item(
                 ui,
                 "Background",
-                &mut app.data.settings.custom_bg_color,
+                &mut app.data.settings.appearance.custom_colors.bg,
                 col_w,
             );
             color_changed |= color_picker_item(
                 ui,
                 "Card Surface",
-                &mut app.data.settings.custom_card_color,
+                &mut app.data.settings.appearance.custom_colors.card,
                 col_w,
             );
         });
@@ -552,13 +686,13 @@ fn render_custom_colors_card(
             color_changed |= color_picker_item(
                 ui,
                 "Border Tint",
-                &mut app.data.settings.custom_border_color,
+                &mut app.data.settings.appearance.custom_colors.border,
                 col_w,
             );
             color_changed |= color_picker_item(
                 ui,
                 "Primary Accent",
-                &mut app.data.settings.custom_accent_color,
+                &mut app.data.settings.appearance.custom_colors.accent,
                 col_w,
             );
         });
@@ -570,13 +704,13 @@ fn render_custom_colors_card(
             color_changed |= color_picker_item(
                 ui,
                 "Secondary Accent",
-                &mut app.data.settings.custom_secondary_accent_color,
+                &mut app.data.settings.appearance.custom_colors.secondary_accent,
                 col_w,
             );
             color_changed |= color_picker_item(
                 ui,
                 "Primary Text",
-                &mut app.data.settings.custom_text_color,
+                &mut app.data.settings.appearance.custom_colors.text,
                 col_w,
             );
         });
@@ -588,13 +722,13 @@ fn render_custom_colors_card(
             color_changed |= color_picker_item(
                 ui,
                 "Muted Text",
-                &mut app.data.settings.custom_muted_text_color,
+                &mut app.data.settings.appearance.custom_colors.muted_text,
                 col_w,
             );
             color_changed |= color_picker_item(
                 ui,
                 "Danger Action",
-                &mut app.data.settings.custom_danger_color,
+                &mut app.data.settings.appearance.custom_colors.danger,
                 col_w,
             );
         });
@@ -607,7 +741,7 @@ fn render_custom_colors_card(
     });
 }
 
-/// Renders the System Font family dropdown picker card.
+/// Renders the System Font selection combo box card.
 fn render_system_font_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
@@ -623,7 +757,7 @@ fn render_system_font_card(
                     .color(Color32::from_gray(230)),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let current_font = app.data.settings.selected_font.clone();
+                let current_font = app.data.settings.appearance.selected_font.clone();
                 let font_combo = egui::ComboBox::from_id_salt("sys_font_select").selected_text(
                     RichText::new(&current_font)
                         .font(FontId::proportional(12.0))
@@ -634,13 +768,16 @@ fn render_system_font_card(
                     for f_name in fonts {
                         if ui
                             .selectable_value(
-                                &mut app.data.settings.selected_font,
+                                &mut app.data.settings.appearance.selected_font,
                                 f_name.clone(),
                                 &f_name,
                             )
                             .clicked()
                         {
-                            crate::font::apply_system_font(ctx, &app.data.settings.selected_font);
+                            crate::font::apply_system_font(
+                                ctx,
+                                &app.data.settings.appearance.selected_font,
+                            );
                             app.is_dirty = true;
                             ctx.request_repaint();
                         }
@@ -664,17 +801,17 @@ fn render_window_presets_card(
             for preset in WindowSizePreset::all() {
                 let w = preset.width;
                 let h = preset.height;
-                let is_active = (app.data.settings.window_width - w).abs() < 5.0
-                    && (app.data.settings.window_height - h).abs() < 5.0;
+                let is_active = (app.data.settings.window.width - w).abs() < 5.0
+                    && (app.data.settings.window.height - h).abs() < 5.0;
                 let label = format!(
                     "{} ({}x{} • {:.1}pt)",
                     preset.label, w as u32, h as u32, preset.default_font_size
                 );
 
                 if button::selection_pill(ui, &label, is_active, palette).clicked() {
-                    app.data.settings.window_width = w;
-                    app.data.settings.window_height = h;
-                    app.data.settings.font_size = preset.default_font_size;
+                    app.data.settings.window.width = w;
+                    app.data.settings.window.height = h;
+                    app.data.settings.editor.font_size = preset.default_font_size;
                     app.data.settings.validate_and_clamp();
                     ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(w, h)));
                     app.is_dirty = true;
@@ -701,12 +838,12 @@ fn render_appearance_card(
 ) {
     card::settings_card(ui, "WINDOW & GLASS STYLING", palette, |ui| {
         // Opacity Slider
-        let opacity_pct = (app.data.settings.opacity * 100.0) as u32;
+        let opacity_pct = (app.data.settings.appearance.opacity * 100.0) as u32;
         if slider::slider_row(
             ui,
             "Window Opacity",
             &format!("{}%", opacity_pct),
-            &mut app.data.settings.opacity,
+            &mut app.data.settings.appearance.opacity,
             0.30..=1.00,
             palette.accent,
         )
@@ -719,12 +856,12 @@ fn render_appearance_card(
         }
 
         // Glass Blur Strength / Hardness Slider
-        let blur_pct = (app.data.settings.blur_strength * 100.0) as u32;
+        let blur_pct = (app.data.settings.appearance.blur_strength * 100.0) as u32;
         if slider::slider_row(
             ui,
             "Glass Blur & Hardness",
             &format!("{}%", blur_pct),
-            &mut app.data.settings.blur_strength,
+            &mut app.data.settings.appearance.blur_strength,
             0.0..=1.0,
             palette.accent,
         )
@@ -737,12 +874,12 @@ fn render_appearance_card(
         }
 
         // Window Corner Radius Slider
-        let radius_str = format!("{:.0}px", app.data.settings.corner_radius);
+        let radius_str = format!("{:.0}px", app.data.settings.appearance.corner_radius);
         if slider::slider_row(
             ui,
             "Window Corner Rounding",
             &radius_str,
-            &mut app.data.settings.corner_radius,
+            &mut app.data.settings.appearance.corner_radius,
             4.0..=24.0,
             palette.accent,
         )
@@ -758,7 +895,7 @@ fn render_appearance_card(
         if toggle::toggle_row(
             ui,
             "Show Bottom Status Bar",
-            &mut app.data.settings.show_status_bar,
+            &mut app.data.settings.editor.show_status_bar,
             palette.accent,
         )
         .changed()
@@ -771,18 +908,37 @@ fn render_appearance_card(
         if toggle::toggle_row(
             ui,
             "Always on Top (Floating Mode)",
-            &mut app.data.settings.always_on_top,
+            &mut app.data.settings.window.always_on_top,
             palette.accent,
         )
         .changed()
         {
-            let level = if app.data.settings.always_on_top {
+            let level = if app.data.settings.window.always_on_top {
                 egui::WindowLevel::AlwaysOnTop
             } else {
                 egui::WindowLevel::Normal
             };
             ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
             app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        ui.add_space(4.0);
+        let reset_appearance_btn = button::animated_action_button(
+            ui,
+            "↺ Reset Appearance to Defaults",
+            palette,
+            egui::vec2(ui.available_width(), 28.0),
+        );
+        if reset_appearance_btn.clicked() {
+            app.data.settings.appearance = crate::models::settings::AppearanceSettings::default();
+            app.data.settings.validate_and_clamp();
+            theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+            app.is_dirty = true;
+            app.show_toast(
+                "Appearance reset to defaults",
+                crate::ui::toast::ToastKind::Info,
+            );
             ctx.request_repaint();
         }
     });
@@ -797,12 +953,12 @@ fn render_editor_behavior_card(
 ) {
     card::settings_card(ui, "EDITOR BEHAVIOR & TYPOGRAPHY", palette, |ui| {
         // Font Size Slider
-        let font_str = format!("{:.0}pt", app.data.settings.font_size);
+        let font_str = format!("{:.0}pt", app.data.settings.editor.font_size);
         if slider::slider_row(
             ui,
             "Editor Font Size",
             &font_str,
-            &mut app.data.settings.font_size,
+            &mut app.data.settings.editor.font_size,
             8.0..=36.0,
             palette.accent,
         )
@@ -817,7 +973,7 @@ fn render_editor_behavior_card(
         if toggle::toggle_row(
             ui,
             "Monospace Font (Code Mode)",
-            &mut app.data.settings.monospace_font,
+            &mut app.data.settings.editor.monospace_font,
             palette.accent,
         )
         .changed()
@@ -830,7 +986,7 @@ fn render_editor_behavior_card(
         if toggle::toggle_row(
             ui,
             "Show Line Numbers in Gutter",
-            &mut app.data.settings.show_line_numbers,
+            &mut app.data.settings.editor.show_line_numbers,
             palette.accent,
         )
         .changed()
@@ -843,7 +999,7 @@ fn render_editor_behavior_card(
         if button::selection_row(
             ui,
             "Tab Indentation Width",
-            &mut app.data.settings.tab_size,
+            &mut app.data.settings.editor.tab_size,
             [("2 sp", 2), ("4 sp", 4), ("8 sp", 8)],
             palette,
         ) {
@@ -855,7 +1011,7 @@ fn render_editor_behavior_card(
         if button::selection_row(
             ui,
             "Default New Note Format",
-            &mut app.data.settings.default_extension,
+            &mut app.data.settings.editor.default_extension,
             [
                 (".qn (Quicky)", ".qn".to_string()),
                 (".md (Markdown)", ".md".to_string()),
@@ -875,7 +1031,7 @@ fn render_editor_behavior_card(
         if toggle::toggle_row(
             ui,
             "Confirm Before Closing Note",
-            &mut app.data.settings.confirm_close_tab,
+            &mut app.data.settings.editor.confirm_close_tab,
             palette.accent,
         )
         .changed()
@@ -888,7 +1044,7 @@ fn render_editor_behavior_card(
         if toggle::toggle_row(
             ui,
             "Trim Trailing Whitespace on Save",
-            &mut app.data.settings.trim_trailing_whitespace,
+            &mut app.data.settings.editor.trim_trailing_whitespace,
             palette.accent,
         )
         .changed()
@@ -901,7 +1057,7 @@ fn render_editor_behavior_card(
         if toggle::toggle_row(
             ui,
             "Language Syntax Highlighting",
-            &mut app.data.settings.enable_syntax_highlighting,
+            &mut app.data.settings.editor.enable_syntax_highlighting,
             palette.accent,
         )
         .changed()
@@ -914,7 +1070,7 @@ fn render_editor_behavior_card(
         if toggle::toggle_row(
             ui,
             "Ghost Autocomplete (Tab to accept)",
-            &mut app.data.settings.enable_ghost_text,
+            &mut app.data.settings.editor.enable_ghost_text,
             palette.accent,
         )
         .changed()
@@ -924,12 +1080,12 @@ fn render_editor_behavior_card(
         }
 
         // Auto Save Interval Slider
-        let auto_save_str = format!("{}s", app.data.settings.auto_save_seconds);
+        let auto_save_str = format!("{}s", app.data.settings.editor.auto_save_seconds);
         if slider::slider_row_u32(
             ui,
             "Auto-Save Interval",
             &auto_save_str,
-            &mut app.data.settings.auto_save_seconds,
+            &mut app.data.settings.editor.auto_save_seconds,
             1..=60,
             palette.accent,
         )
@@ -937,6 +1093,24 @@ fn render_editor_behavior_card(
         {
             app.data.settings.validate_and_clamp();
             app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        ui.add_space(4.0);
+        let reset_editor_btn = button::animated_action_button(
+            ui,
+            "↺ Reset Editor Settings to Defaults",
+            palette,
+            egui::vec2(ui.available_width(), 28.0),
+        );
+        if reset_editor_btn.clicked() {
+            app.data.settings.editor = crate::models::settings::EditorSettings::default();
+            app.data.settings.validate_and_clamp();
+            app.is_dirty = true;
+            app.show_toast(
+                "Editor settings reset to defaults",
+                crate::ui::toast::ToastKind::Info,
+            );
             ctx.request_repaint();
         }
     });
@@ -1140,6 +1314,23 @@ fn render_ai_settings_card(
         if ui.add(prompt_edit).changed() {
             app.is_dirty = true;
         }
+
+        ui.add_space(6.0);
+        let reset_ai_btn = button::animated_action_button(
+            ui,
+            "↺ Reset AI Settings to Defaults",
+            palette,
+            egui::vec2(ui.available_width(), 28.0),
+        );
+        if reset_ai_btn.clicked() {
+            app.data.settings.ai = crate::ai::AiSettings::default();
+            app.is_dirty = true;
+            app.show_toast(
+                "AI configuration reset to defaults",
+                crate::ui::toast::ToastKind::Info,
+            );
+            ctx.request_repaint();
+        }
     });
 }
 
@@ -1160,8 +1351,13 @@ fn render_quick_actions_card(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
 }
 
 /// Renders file persistence, data directory opening, and backup info card.
-fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
-    card::settings_card(ui, "STORAGE & DURABILITY", palette, |ui| {
+fn render_backup_info_card(
+    app: &mut QuickyNotesApp,
+    _ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    card::settings_card(ui, "STORAGE & CONFIGURATION PORTABILITY", palette, |ui| {
         let cfg_path = crate::storage::AppData::config_path();
         let db_path = crate::storage::AppData::db_path();
 
@@ -1178,11 +1374,36 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
 
         ui.add_space(6.0);
 
+        ui.horizontal(|ui| {
+            let col_w = (ui.available_width() - 8.0) * 0.5;
+            let export_cfg_btn = button::animated_action_button(
+                ui,
+                "📤 Export Settings",
+                palette,
+                egui::vec2(col_w, 30.0),
+            );
+            if export_cfg_btn.clicked() {
+                crate::ui::drag_drop::export_settings(app);
+            }
+
+            let import_cfg_btn = button::animated_action_button(
+                ui,
+                "📥 Import Settings",
+                palette,
+                egui::vec2(ui.available_width(), 30.0),
+            );
+            if import_cfg_btn.clicked() {
+                crate::ui::drag_drop::import_settings(app);
+            }
+        });
+
+        ui.add_space(4.0);
+
         let open_folder_btn = button::animated_action_button(
             ui,
             "📁 Open Data Folder in File Manager",
             palette,
-            egui::vec2(ui.available_width(), 32.0),
+            egui::vec2(ui.available_width(), 30.0),
         );
 
         if open_folder_btn.clicked()
@@ -1535,6 +1756,8 @@ fn render_shortcuts_card(
     }
 }
 
+const APP_ICON_BYTES: &[u8] = include_bytes!("../../assets/icon.png");
+
 /// Renders the About This App card and Factory Reset control.
 fn render_about_card(
     app: &mut QuickyNotesApp,
@@ -1542,24 +1765,61 @@ fn render_about_card(
     ui: &mut Ui,
     palette: &theme::Palette,
 ) {
-    card::settings_card(ui, "ABOUT THIS APP", palette, |ui| {
-        ui.label(
-            RichText::new(
-                "A fast and minimal note taking app for developers.\nBuilt with ❤️ for your flow.",
-            )
-            .font(FontId::proportional(12.0))
-            .color(Color32::from_gray(210)),
-        );
+    card::settings_card(ui, "ABOUT QUICKY NOTES", palette, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 14.0;
 
-        ui.label(
-            RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
-                .font(FontId::monospace(11.5))
-                .color(palette.accent),
-        );
+            let icon_source = egui::ImageSource::Bytes {
+                uri: std::borrow::Cow::Borrowed("bytes://quicky_icon.png"),
+                bytes: egui::load::Bytes::Static(APP_ICON_BYTES),
+            };
+
+            ui.add(
+                egui::Image::new(icon_source)
+                    .fit_to_exact_size(egui::vec2(54.0, 54.0))
+                    .corner_radius(CornerRadius::same(10)),
+            );
+
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Quicky Notes")
+                            .font(FontId::proportional(16.0))
+                            .strong()
+                            .color(Color32::WHITE),
+                    );
+                    ui.label(
+                        RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                            .font(FontId::monospace(11.0))
+                            .color(palette.accent),
+                    );
+                });
+
+                ui.label(
+                    RichText::new(
+                        "Floating glassmorphism note widget and code scratchpad for Linux.",
+                    )
+                    .font(FontId::proportional(12.0))
+                    .color(Color32::from_gray(210)),
+                );
+
+                ui.label(
+                    RichText::new("Built with Rust • SQLite ACID • egui • Wayland & X11 Native")
+                        .font(FontId::proportional(10.5))
+                        .color(Color32::from_gray(160)),
+                );
+            });
+        });
+
+        ui.add_space(8.0);
 
         ui.horizontal(|ui| {
-            let gh_btn =
-                button::animated_action_button(ui, "GitHub ↗", palette, egui::vec2(120.0, 30.0));
+            let gh_btn = button::animated_action_button(
+                ui,
+                "⭐ GitHub Repository ↗",
+                palette,
+                egui::vec2(165.0, 28.0),
+            );
             if gh_btn
                 .on_hover_text("https://github.com/amitxd75/quicky_notes")
                 .clicked()
@@ -1596,7 +1856,7 @@ fn render_about_card(
             app.data.settings = crate::settings::AppSettings::default();
             app.data.settings.validate_and_clamp();
             theme::setup_glassmorphism_theme(ctx, &app.data.settings);
-            let level = if app.data.settings.always_on_top {
+            let level = if app.data.settings.window.always_on_top {
                 egui::WindowLevel::AlwaysOnTop
             } else {
                 egui::WindowLevel::Normal

@@ -507,19 +507,19 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                             crate::ui::markdown::render_markdown(
                                                 ui,
                                                 preview,
-                                                app.data.settings.font_size.clamp(11.0, 15.0),
-                                                app.data.settings.monospace_font,
+                                                app.data.settings.editor.font_size.clamp(11.0, 15.0),
+                                                app.data.settings.editor.monospace_font,
                                                 &palette,
                                                 None,
                                             );
                                         } else if !active_lang.is_empty() {
                                             let code_font_size =
-                                                app.data.settings.font_size.clamp(11.0, 15.0);
+                                                app.data.settings.editor.font_size.clamp(11.0, 15.0);
                                             let code_theme =
                                                 egui_extras::syntax_highlighting::CodeTheme::dark(
                                                     code_font_size,
                                                 );
-                                            let font_id = if app.data.settings.monospace_font {
+                                            let font_id = if app.data.settings.editor.monospace_font {
                                                 FontId::monospace(code_font_size)
                                             } else {
                                                 FontId::proportional(code_font_size)

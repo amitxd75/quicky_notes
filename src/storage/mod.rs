@@ -426,7 +426,7 @@ mod tests {
 
         let mut data = AppData::default_initial();
         data.notes[0].title = "Custom Title".to_string();
-        data.settings.font_size = 20.0;
+        data.settings.editor.font_size = 20.0;
         data.settings.ai.api_key = "sk-test-secret-key-999".to_string();
 
         data.save_to_paths(&config_path, &db_path).unwrap();
@@ -440,7 +440,7 @@ mod tests {
         let loaded = AppData::load_with_paths(&config_path, &db_path);
         assert_eq!(loaded.notes.len(), 1);
         assert_eq!(loaded.notes[0].title, "Custom Title");
-        assert_eq!(loaded.settings.font_size, 20.0);
+        assert_eq!(loaded.settings.editor.font_size, 20.0);
         assert_eq!(loaded.settings.ai.api_key, "sk-test-secret-key-999");
 
         let _ = fs::remove_dir_all(&temp_dir);

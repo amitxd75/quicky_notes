@@ -868,8 +868,8 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     }
 
     if trigger_always_on_top {
-        app.data.settings.always_on_top = !app.data.settings.always_on_top;
-        let level = if app.data.settings.always_on_top {
+        app.data.settings.window.always_on_top = !app.data.settings.window.always_on_top;
+        let level = if app.data.settings.window.always_on_top {
             egui::WindowLevel::AlwaysOnTop
         } else {
             egui::WindowLevel::Normal
@@ -880,7 +880,7 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     }
 
     if trigger_font_inc {
-        app.data.settings.font_size = (app.data.settings.font_size + FONT_SIZE_STEP)
+        app.data.settings.editor.font_size = (app.data.settings.editor.font_size + FONT_SIZE_STEP)
             .min(crate::models::settings::MAX_FONT_SIZE);
         app.data.settings.validate_and_clamp();
         app.is_dirty = true;
@@ -890,13 +890,13 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         );
         app.set_status(format!(
             "Font size: {:.0}pt (saved)",
-            app.data.settings.font_size
+            app.data.settings.editor.font_size
         ));
         ctx.request_repaint();
     }
 
     if trigger_font_dec {
-        app.data.settings.font_size = (app.data.settings.font_size - FONT_SIZE_STEP)
+        app.data.settings.editor.font_size = (app.data.settings.editor.font_size - FONT_SIZE_STEP)
             .max(crate::models::settings::MIN_FONT_SIZE);
         app.data.settings.validate_and_clamp();
         app.is_dirty = true;
@@ -906,7 +906,7 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         );
         app.set_status(format!(
             "Font size: {:.0}pt (saved)",
-            app.data.settings.font_size
+            app.data.settings.editor.font_size
         ));
         ctx.request_repaint();
     }
