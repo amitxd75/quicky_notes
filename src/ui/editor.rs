@@ -87,14 +87,21 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
     app.focus_editor = false;
 
     let palette = theme::get_palette(&app.data.settings);
+    let enable_ghost_text = app.data.settings.enable_ghost_text;
+    let show_line_numbers = app.data.settings.show_line_numbers;
+    let enable_syntax = app.data.settings.enable_syntax_highlighting;
+    let line_count = app.cached_active_stats.2;
     let mut content_changed = false;
     let mut context_menu_action: Option<crate::ui::context_menu::ContextMenuAction> = None;
     let current_cursor_range = app.last_cursor_range;
 
+    let suggestion_engine = &mut app.suggestion_engine;
+    let active_ghost_suffix = &mut app.active_ghost_suffix;
+    let last_cursor_range = &mut app.last_cursor_range;
+
     if let Some(active_id) = app.data.active_note_id.as_deref()
         && let Some(note) = app.data.notes.iter_mut().find(|n| n.id == active_id)
     {
-        let line_count = app.cached_active_stats.2;
         let line_font = if is_monospace {
             FontId::monospace(font_size)
         } else {
@@ -108,7 +115,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             crate::app::MarkdownViewMode::Edit
         };
 
-        let language = if app.data.settings.enable_syntax_highlighting {
+        let language = if enable_syntax {
             crate::ui::syntax::detect_language(&note.title, note.file_path.as_deref())
         } else {
             ""
@@ -124,7 +131,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                     .max_height(editor_height)
                     .show(ui, |ui| {
                         ui.horizontal_top(|ui| {
-                            if app.data.settings.show_line_numbers {
+                            if show_line_numbers {
                                 // Line numbers gutter (chunked for unlimited line counts)
                                 render_line_numbers_gutter(ui, line_count, &line_font);
 
@@ -144,85 +151,25 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                 ui.add_space(8.0);
                             }
 
-                            // Multiline text editor with syntax coloration
-                            let mut layouter =
-                                |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-                                    let text = buffer.as_str();
-                                    let font_id = if is_monospace {
-                                        FontId::monospace(font_size)
-                                    } else {
-                                        FontId::proportional(font_size)
-                                    };
-                                    let opts = crate::ui::syntax::HighlightOptions {
-                                        theme: &code_theme,
-                                        language,
-                                        font_id,
-                                        text_color: Color32::WHITE,
-                                        wrap_width,
-                                    };
-                                    let layout_job = crate::ui::syntax::highlight_text(
-                                        ui.ctx(),
-                                        ui.style(),
-                                        text,
-                                        opts,
-                                    );
-                                    ui.fonts_mut(|f| f.layout_job(layout_job))
-                                };
-
-                            let text_edit = egui::TextEdit::multiline(&mut note.content)
-                                .frame(egui::Frame::NONE)
-                                .hint_text("Type your notes here...")
-                                .desired_width(ui.available_width())
-                                .layouter(&mut layouter);
-
-                            let output = text_edit.show(ui);
-                            let resp = output.response;
-
-                            let is_rmb = ui.input(|i| {
-                                i.pointer.button_down(egui::PointerButton::Secondary)
-                                    || i.pointer.button_clicked(egui::PointerButton::Secondary)
-                            });
-
-                            if is_rmb
-                                && let Some((start, end)) = current_cursor_range
-                                && start < end
-                            {
-                                // Preserve active text selection on right-click
-                                app.last_cursor_range = Some((start, end));
-                                let mut state =
-                                    egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
-                                        .unwrap_or(output.state);
-                                state.cursor.set_char_range(Some(
-                                    egui::text_selection::CCursorRange::two(
-                                        egui::text::CCursor::new(start),
-                                        egui::text::CCursor::new(end),
-                                    ),
-                                ));
-                                state.store(ui.ctx(), resp.id);
-                            } else if let Some(range) = output.state.cursor.char_range() {
-                                let p: usize = range.primary.index.into();
-                                let s: usize = range.secondary.index.into();
-                                app.last_cursor_range = Some((p.min(s), p.max(s)));
-                            }
-
-                            // Right-click Context Menu (Cut, Copy, Paste, AI Copilot, etc.)
-                            resp.context_menu(|ui| {
-                                crate::ui::context_menu::render_editor_context_menu(
-                                    ui,
-                                    note,
-                                    app.last_cursor_range,
-                                    &palette,
-                                    &mut context_menu_action,
-                                );
-                            });
-
-                            if resp.changed() {
-                                content_changed = true;
-                            }
-
-                            if should_focus {
-                                resp.request_focus();
-                            }
+                            render_multiline_editor_pane(
+                                ui,
+                                note,
+                                enable_ghost_text,
+                                active_ghost_suffix,
+                                suggestion_engine,
+                                last_cursor_range,
+                                current_cursor_range,
+                                &palette,
+                                &line_font,
+                                &code_theme,
+                                language,
+                                is_monospace,
+                                font_size,
+                                "Type your notes here...",
+                                should_focus,
+                                &mut content_changed,
+                                &mut context_menu_action,
+                            );
                         });
                     });
             }
@@ -285,87 +232,25 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                         ui.add_space(6.0);
                                     }
 
-                                    let mut split_layouter =
-                                        |ui: &egui::Ui,
-                                         buffer: &dyn egui::TextBuffer,
-                                         wrap_width: f32| {
-                                            let text = buffer.as_str();
-                                            let font_id = if is_monospace {
-                                                FontId::monospace(font_size)
-                                            } else {
-                                                FontId::proportional(font_size)
-                                            };
-                                            let opts = crate::ui::syntax::HighlightOptions {
-                                                theme: &code_theme,
-                                                language,
-                                                font_id,
-                                                text_color: Color32::WHITE,
-                                                wrap_width,
-                                            };
-                                            let layout_job = crate::ui::syntax::highlight_text(
-                                                ui.ctx(),
-                                                ui.style(),
-                                                text,
-                                                opts,
-                                            );
-                                            ui.fonts_mut(|f| f.layout_job(layout_job))
-                                        };
-
-                                    let text_edit = egui::TextEdit::multiline(&mut note.content)
-                                        .frame(egui::Frame::NONE)
-                                        .hint_text("Type markdown here...")
-                                        .desired_width(ui.available_width())
-                                        .layouter(&mut split_layouter);
-
-                                    let output = text_edit.show(ui);
-                                    let resp = output.response;
-
-                                    let is_rmb = ui.input(|i| {
-                                        i.pointer.button_down(egui::PointerButton::Secondary)
-                                            || i.pointer
-                                                .button_clicked(egui::PointerButton::Secondary)
-                                    });
-
-                                    if is_rmb
-                                        && let Some((start, end)) = current_cursor_range
-                                        && start < end
-                                    {
-                                        // Preserve active text selection on right-click
-                                        app.last_cursor_range = Some((start, end));
-                                        let mut state =
-                                            egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
-                                                .unwrap_or(output.state);
-                                        state.cursor.set_char_range(Some(
-                                            egui::text_selection::CCursorRange::two(
-                                                egui::text::CCursor::new(start),
-                                                egui::text::CCursor::new(end),
-                                            ),
-                                        ));
-                                        state.store(ui.ctx(), resp.id);
-                                    } else if let Some(range) = output.state.cursor.char_range() {
-                                        let p: usize = range.primary.index.into();
-                                        let s: usize = range.secondary.index.into();
-                                        app.last_cursor_range = Some((p.min(s), p.max(s)));
-                                    }
-
-                                    // Right-click Context Menu
-                                    resp.context_menu(|ui| {
-                                        crate::ui::context_menu::render_editor_context_menu(
-                                            ui,
-                                            note,
-                                            app.last_cursor_range,
-                                            &palette,
-                                            &mut context_menu_action,
-                                        );
-                                    });
-
-                                    if resp.changed() {
-                                        content_changed = true;
-                                    }
-
-                                    if should_focus {
-                                        resp.request_focus();
-                                    }
+                                    render_multiline_editor_pane(
+                                        ui,
+                                        note,
+                                        enable_ghost_text,
+                                        active_ghost_suffix,
+                                        suggestion_engine,
+                                        last_cursor_range,
+                                        current_cursor_range,
+                                        &palette,
+                                        &line_font,
+                                        &code_theme,
+                                        language,
+                                        is_monospace,
+                                        font_size,
+                                        "Type markdown here...",
+                                        should_focus,
+                                        &mut content_changed,
+                                        &mut context_menu_action,
+                                    );
                                 });
                             });
                     });
@@ -841,3 +726,336 @@ pub fn render_drop_hover_overlay(ctx: &egui::Context) {
 }
 
 pub use crate::ui::toast::render_floating_toast;
+
+/// Renders a single multiline syntax-highlighted editor pane with ghost text, context menu, and auto-learning.
+#[allow(clippy::too_many_arguments)]
+fn render_multiline_editor_pane(
+    ui: &mut Ui,
+    note: &mut crate::note::Note,
+    enable_ghost_text: bool,
+    active_ghost_suffix: &mut Option<String>,
+    suggestion_engine: &mut crate::suggest::SuggestionEngine,
+    last_cursor_range: &mut Option<(usize, usize)>,
+    current_cursor_range: Option<(usize, usize)>,
+    palette: &theme::Palette,
+    line_font: &FontId,
+    code_theme: &egui_extras::syntax_highlighting::CodeTheme,
+    language: &'static str,
+    is_monospace: bool,
+    font_size: f32,
+    hint_text: &str,
+    should_focus: bool,
+    content_changed: &mut bool,
+    context_menu_action: &mut Option<crate::ui::context_menu::ContextMenuAction>,
+) {
+    debug_assert!(
+        (8.0..=48.0).contains(&font_size),
+        "Font size must be within valid bounds"
+    );
+
+    let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+        let text = buffer.as_str();
+        let font_id = if is_monospace {
+            FontId::monospace(font_size)
+        } else {
+            FontId::proportional(font_size)
+        };
+        let opts = crate::ui::syntax::HighlightOptions {
+            theme: code_theme,
+            language,
+            font_id,
+            text_color: Color32::WHITE,
+            wrap_width,
+        };
+        let layout_job = crate::ui::syntax::highlight_text(ui.ctx(), ui.style(), text, opts);
+        ui.fonts_mut(|f| f.layout_job(layout_job))
+    };
+
+    let tab_pressed_for_ghost = enable_ghost_text
+        && active_ghost_suffix.is_some()
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+
+    let text_edit = egui::TextEdit::multiline(&mut note.content)
+        .frame(egui::Frame::NONE)
+        .hint_text(hint_text)
+        .desired_width(ui.available_width())
+        .lock_focus(true)
+        .layouter(&mut layouter);
+
+    let output = text_edit.show(ui);
+    let resp = &output.response;
+
+    let accepted = handle_ghost_text(
+        enable_ghost_text,
+        tab_pressed_for_ghost,
+        suggestion_engine,
+        active_ghost_suffix,
+        last_cursor_range,
+        palette,
+        ui,
+        note,
+        &output,
+        line_font,
+        content_changed,
+    );
+
+    let is_rmb = ui.input(|i| {
+        i.pointer.button_down(egui::PointerButton::Secondary)
+            || i.pointer.button_clicked(egui::PointerButton::Secondary)
+    });
+
+    if !accepted {
+        if is_rmb
+            && let Some((start, end)) = current_cursor_range
+            && start < end
+        {
+            *last_cursor_range = Some((start, end));
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
+                .unwrap_or_else(|| output.state.clone());
+            state
+                .cursor
+                .set_char_range(Some(egui::text_selection::CCursorRange::two(
+                    egui::text::CCursor::new(start),
+                    egui::text::CCursor::new(end),
+                )));
+            state.store(ui.ctx(), resp.id);
+        } else if let Some(range) = output.state.cursor.char_range() {
+            let p: usize = range.primary.index.into();
+            let s: usize = range.secondary.index.into();
+            *last_cursor_range = Some((p.min(s), p.max(s)));
+        }
+    }
+
+    resp.context_menu(|ui| {
+        crate::ui::context_menu::render_editor_context_menu(
+            ui,
+            note,
+            *last_cursor_range,
+            palette,
+            context_menu_action,
+        );
+    });
+
+    if resp.changed() {
+        *content_changed = true;
+        if let Some(range) = output.state.cursor.char_range() {
+            let p: usize = range.primary.index.into();
+            let text_before = note.char_slice(0, p);
+            let trimmed = text_before.trim_end();
+            if trimmed.len() < text_before.len() {
+                let (_, prev_w) = crate::engine::suggest::extract_preceding_words(&text_before);
+                if let Some(completed_word) = prev_w {
+                    suggestion_engine.learn_word(&completed_word);
+                }
+            }
+        }
+    }
+
+    if should_focus {
+        resp.request_focus();
+    }
+}
+
+/// Extracts the active word prefix immediately preceding a character index (zero heap allocation).
+fn extract_word_prefix_before_cursor(content: &str, cursor_char_idx: usize) -> &str {
+    if cursor_char_idx == 0 {
+        return "";
+    }
+
+    // Get the character immediately preceding cursor_char_idx
+    let Some(prev_char) = content.chars().nth(cursor_char_idx - 1) else {
+        return "";
+    };
+
+    // If character directly before cursor is not alphanumeric, identifier, or apostrophe, there is no prefix.
+    if !prev_char.is_alphanumeric()
+        && prev_char != '_'
+        && prev_char != '-'
+        && prev_char != '\''
+        && prev_char != '’'
+    {
+        return "";
+    }
+
+    // Convert char index to byte index safely
+    let mut cursor_byte = 0;
+    for (i, (b_idx, c)) in content.char_indices().enumerate() {
+        if i == cursor_char_idx {
+            cursor_byte = b_idx;
+            break;
+        }
+        cursor_byte = b_idx + c.len_utf8();
+    }
+
+    let text_before = &content[..cursor_byte.min(content.len())];
+    let start = text_before
+        .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '-' && c != '\'' && c != '’')
+        .map_or(0, |pos| {
+            let sub = &text_before[pos..];
+            let first_char_len = sub.chars().next().map_or(1, |c| c.len_utf8());
+            pos + first_char_len
+        });
+
+    &text_before[start..]
+}
+
+/// Checks if the character immediately following the cursor is not continuing an existing word.
+fn is_cursor_at_end_of_word(content: &str, cursor_char_idx: usize) -> bool {
+    let mut chars = content.chars().skip(cursor_char_idx);
+    match chars.next() {
+        Some(c) => !c.is_alphanumeric() && c != '_' && c != '-' && c != '\'' && c != '’',
+        None => true,
+    }
+}
+
+/// Handles ghost writing autocomplete display and Tab acceptance.
+#[allow(clippy::too_many_arguments)]
+fn handle_ghost_text(
+    enable_ghost_text: bool,
+    tab_accepted: bool,
+    suggestion_engine: &mut crate::suggest::SuggestionEngine,
+    active_ghost_suffix: &mut Option<String>,
+    last_cursor_range: &mut Option<(usize, usize)>,
+    palette: &theme::Palette,
+    ui: &mut Ui,
+    note: &mut crate::note::Note,
+    output: &egui::text_edit::TextEditOutput,
+    line_font: &FontId,
+    content_changed: &mut bool,
+) -> bool {
+    if !enable_ghost_text {
+        *active_ghost_suffix = None;
+        return false;
+    }
+
+    let Some(cursor_range) = output.state.cursor.char_range() else {
+        *active_ghost_suffix = None;
+        return false;
+    };
+
+    if cursor_range.primary.index != cursor_range.secondary.index {
+        *active_ghost_suffix = None;
+        return false;
+    }
+
+    let char_idx: usize = cursor_range.primary.index.into();
+
+    if !is_cursor_at_end_of_word(&note.content, char_idx) {
+        *active_ghost_suffix = None;
+        return false;
+    }
+
+    let prefix = extract_word_prefix_before_cursor(&note.content, char_idx);
+    if prefix.is_empty() {
+        *active_ghost_suffix = None;
+        return false;
+    }
+
+    let prefix_str = prefix.to_string();
+    let prefix_char_count = prefix_str.chars().count();
+    let context_char_end = char_idx.saturating_sub(prefix_char_count);
+    let context_before = note.char_slice(0, context_char_end);
+
+    let suggestion = suggestion_engine.suggest_with_context(&context_before, &prefix_str);
+    *active_ghost_suffix = suggestion.clone();
+
+    let Some(suffix) = suggestion else {
+        return false;
+    };
+
+    if tab_accepted {
+        // Always append a trailing space when accepting completion (unless following char is already space)
+        let next_char = note.content.chars().nth(char_idx);
+        let should_add_space = next_char != Some(' ');
+        let inserted_text = if should_add_space {
+            format!("{} ", suffix)
+        } else {
+            suffix.clone()
+        };
+
+        note.replace_char_range(char_idx, char_idx, &inserted_text);
+        let new_char_idx = char_idx + inserted_text.chars().count();
+
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), output.response.id)
+            .unwrap_or_else(|| output.state.clone());
+        state
+            .cursor
+            .set_char_range(Some(egui::text_selection::CCursorRange::one(
+                egui::text::CCursor::new(new_char_idx),
+            )));
+        state.store(ui.ctx(), output.response.id);
+
+        *last_cursor_range = Some((new_char_idx, new_char_idx));
+        *active_ghost_suffix = None;
+        *content_changed = true;
+
+        let full_word = format!("{}{}", prefix_str, suffix);
+        suggestion_engine.learn_word(&full_word);
+        let (_, prev_w) = crate::engine::suggest::extract_preceding_words(&context_before);
+        if let Some(w1) = prev_w {
+            suggestion_engine.learn_bigram(&w1, &full_word);
+        }
+
+        ui.ctx().request_repaint();
+        return true;
+    }
+
+    // Render faded ghost text at the exact cursor screen position
+    let cursor_cpos = cursor_range.primary;
+    let cursor_rect = output.galley.pos_from_cursor(cursor_cpos);
+    let ghost_screen_pos = output.galley_pos + egui::vec2(cursor_rect.max.x, cursor_rect.min.y);
+
+    let ghost_color = Color32::from_rgba_unmultiplied(
+        palette.accent.r(),
+        palette.accent.g(),
+        palette.accent.b(),
+        140,
+    );
+
+    ui.painter().text(
+        ghost_screen_pos,
+        egui::Align2::LEFT_TOP,
+        &suffix,
+        line_font.clone(),
+        ghost_color,
+    );
+
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_word_prefix_stops_on_space_and_punctuation() {
+        assert_eq!(extract_word_prefix_before_cursor("hello", 5), "hello");
+        assert_eq!(extract_word_prefix_before_cursor("hello ", 6), "");
+        assert_eq!(extract_word_prefix_before_cursor("hello world", 6), "");
+        assert_eq!(
+            extract_word_prefix_before_cursor("hello world", 11),
+            "world"
+        );
+        assert_eq!(extract_word_prefix_before_cursor("hello\n", 6), "");
+        assert_eq!(
+            extract_word_prefix_before_cursor("let x = somet", 13),
+            "somet"
+        );
+        assert_eq!(extract_word_prefix_before_cursor("let x = somet ", 14), "");
+        assert_eq!(extract_word_prefix_before_cursor("hello.", 6), "");
+        assert_eq!(extract_word_prefix_before_cursor("", 0), "");
+
+        // Exact typing flow with spaces
+        assert_eq!(extract_word_prefix_before_cursor("fast", 4), "fast");
+        assert_eq!(extract_word_prefix_before_cursor("fast ", 5), "");
+        assert_eq!(extract_word_prefix_before_cursor("fast c", 6), "c");
+        assert_eq!(extract_word_prefix_before_cursor("fast cl", 7), "cl");
+    }
+
+    #[test]
+    fn test_is_cursor_at_end_of_word() {
+        assert!(is_cursor_at_end_of_word("hello", 5));
+        assert!(is_cursor_at_end_of_word("hello world", 5));
+        assert!(!is_cursor_at_end_of_word("hello world", 3));
+    }
+}

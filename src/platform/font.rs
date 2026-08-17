@@ -10,6 +10,8 @@ static CACHED_SYSTEM_FONTS: OnceLock<Vec<String>> = OnceLock::new();
 static CACHED_FONT_PATHS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
 static CACHED_EMOJI_BYTES: OnceLock<Option<Arc<Vec<u8>>>> = OnceLock::new();
 static CACHED_MONO_BYTES: OnceLock<Option<Arc<Vec<u8>>>> = OnceLock::new();
+static CACHED_SYMBOLS_BYTES: OnceLock<Option<Arc<Vec<u8>>>> = OnceLock::new();
+static CACHED_NERD_BYTES: OnceLock<Option<Arc<Vec<u8>>>> = OnceLock::new();
 
 /// Discovers installed system font family names on Linux via `fc-list`.
 /// Results are cached in a OnceLock to eliminate UI thread blocking.
@@ -67,7 +69,7 @@ pub fn get_installed_system_fonts() -> Vec<String> {
 }
 
 /// Queries fontconfig (`fc-match`) to resolve the exact file path of any font family or pattern on Linux.
-/// Results are cached in a thread-safe Mutex<HashMap> to eliminate repeated subprocess spawning.
+/// Results are cached in a thread-safe `Mutex<HashMap>` to eliminate repeated subprocess spawning.
 pub fn resolve_font_path(pattern: &str) -> Option<String> {
     let cache_map = CACHED_FONT_PATHS.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(guard) = cache_map.lock()
@@ -100,16 +102,61 @@ pub fn resolve_font_path(pattern: &str) -> Option<String> {
     resolved
 }
 
+/// Dynamically discovers and loads vector symbol font bytes (DejaVu Sans, Standard Symbols, Symbola).
+pub fn get_system_symbols_font_bytes() -> Option<Arc<Vec<u8>>> {
+    CACHED_SYMBOLS_BYTES
+        .get_or_init(|| {
+            for query in [
+                "DejaVu Sans",
+                "DejaVuSans",
+                "Symbola",
+                "Standard Symbols PS",
+                "FreeSans",
+            ] {
+                if let Some(path) = resolve_font_path(query)
+                    && let Ok(bytes) = fs::read(&path)
+                {
+                    return Some(Arc::new(bytes));
+                }
+            }
+            None
+        })
+        .clone()
+}
+
+/// Dynamically discovers and loads Nerd Font icon glyphs.
+pub fn get_system_nerd_font_bytes() -> Option<Arc<Vec<u8>>> {
+    CACHED_NERD_BYTES
+        .get_or_init(|| {
+            for query in [
+                "JetBrainsMono Nerd Font",
+                "FiraCode Nerd Font",
+                "CaskaydiaCove Nerd Font",
+                "Hack Nerd Font",
+            ] {
+                if let Some(path) = resolve_font_path(query)
+                    && let Ok(bytes) = fs::read(&path)
+                {
+                    return Some(Arc::new(bytes));
+                }
+            }
+            None
+        })
+        .clone()
+}
+
 /// Dynamically discovers and loads system color emoji font bytes via fontconfig.
 /// Result is cached in a OnceLock to read the TTF file only once.
 /// Returns an Arc-wrapped byte vector for cheap cloning.
 pub fn get_system_emoji_font_bytes() -> Option<Arc<Vec<u8>>> {
     CACHED_EMOJI_BYTES
         .get_or_init(|| {
-            if let Some(path) = resolve_font_path("emoji")
-                && let Ok(bytes) = fs::read(&path)
-            {
-                return Some(Arc::new(bytes));
+            for query in ["Noto Emoji", "DejaVu Sans", "emoji"] {
+                if let Some(path) = resolve_font_path(query)
+                    && let Ok(bytes) = fs::read(&path)
+                {
+                    return Some(Arc::new(bytes));
+                }
             }
             None
         })
@@ -134,16 +181,63 @@ pub fn get_system_monospace_font_bytes() -> Option<Arc<Vec<u8>>> {
         .clone()
 }
 
-/// Dynamically injects system monospace and color emoji fonts on startup.
-pub fn setup_default_fonts(ctx: &egui::Context) {
-    let mut fonts = FontDefinitions::default();
+/// Appends system symbols, nerd font icons, and emoji fonts into font definitions.
+fn append_symbol_fallbacks(fonts: &mut FontDefinitions) {
+    if let Some(symbols_bytes) = get_system_symbols_font_bytes() {
+        fonts.font_data.insert(
+            "system_symbols".to_owned(),
+            FontData::from_owned((*symbols_bytes).clone()).into(),
+        );
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .push("system_symbols".to_owned());
+        fonts
+            .families
+            .entry(FontFamily::Monospace)
+            .or_default()
+            .push("system_symbols".to_owned());
+    }
+
+    if let Some(nerd_bytes) = get_system_nerd_font_bytes() {
+        fonts.font_data.insert(
+            "system_nerd".to_owned(),
+            FontData::from_owned((*nerd_bytes).clone()).into(),
+        );
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .push("system_nerd".to_owned());
+        fonts
+            .families
+            .entry(FontFamily::Monospace)
+            .or_default()
+            .push("system_nerd".to_owned());
+    }
 
     if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
         fonts.font_data.insert(
             "system_emoji".to_owned(),
             FontData::from_owned((*emoji_bytes).clone()).into(),
         );
+        fonts
+            .families
+            .entry(FontFamily::Proportional)
+            .or_default()
+            .push("system_emoji".to_owned());
+        fonts
+            .families
+            .entry(FontFamily::Monospace)
+            .or_default()
+            .push("system_emoji".to_owned());
     }
+}
+
+/// Dynamically injects system monospace, vector symbols, nerd icons, and emoji fonts on startup.
+pub fn setup_default_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
 
     if let Some(mono_bytes) = get_system_monospace_font_bytes() {
         fonts.font_data.insert(
@@ -162,19 +256,7 @@ pub fn setup_default_fonts(ctx: &egui::Context) {
             .insert(0, "system_mono".to_owned());
     }
 
-    if fonts.font_data.contains_key("system_emoji") {
-        fonts
-            .families
-            .entry(FontFamily::Proportional)
-            .or_default()
-            .push("system_emoji".to_owned());
-        fonts
-            .families
-            .entry(FontFamily::Monospace)
-            .or_default()
-            .push("system_emoji".to_owned());
-    }
-
+    append_symbol_fallbacks(&mut fonts);
     ctx.set_fonts(fonts);
 }
 
@@ -190,13 +272,6 @@ pub fn apply_system_font(ctx: &egui::Context, font_name: &str) {
     {
         let mut font_defs = FontDefinitions::default();
         let font_key = format!("sys_font_{}", font_name);
-
-        if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
-            font_defs.font_data.insert(
-                "system_emoji".to_owned(),
-                FontData::from_owned((*emoji_bytes).clone()).into(),
-            );
-        }
 
         font_defs
             .font_data
@@ -214,19 +289,7 @@ pub fn apply_system_font(ctx: &egui::Context, font_name: &str) {
             .or_default()
             .insert(0, font_key);
 
-        if font_defs.font_data.contains_key("system_emoji") {
-            font_defs
-                .families
-                .entry(FontFamily::Proportional)
-                .or_default()
-                .push("system_emoji".to_owned());
-            font_defs
-                .families
-                .entry(FontFamily::Monospace)
-                .or_default()
-                .push("system_emoji".to_owned());
-        }
-
+        append_symbol_fallbacks(&mut font_defs);
         ctx.set_fonts(font_defs);
     }
 }
@@ -235,13 +298,6 @@ pub fn apply_system_font(ctx: &egui::Context, font_name: &str) {
 fn build_font_definitions(font_name: &str) -> FontDefinitions {
     if font_name == "Default" || font_name.trim().is_empty() {
         let mut fonts = FontDefinitions::default();
-
-        if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
-            fonts.font_data.insert(
-                "system_emoji".to_owned(),
-                FontData::from_owned((*emoji_bytes).clone()).into(),
-            );
-        }
 
         if let Some(mono_bytes) = get_system_monospace_font_bytes() {
             fonts.font_data.insert(
@@ -260,32 +316,13 @@ fn build_font_definitions(font_name: &str) -> FontDefinitions {
                 .insert(0, "system_mono".to_owned());
         }
 
-        if fonts.font_data.contains_key("system_emoji") {
-            fonts
-                .families
-                .entry(FontFamily::Proportional)
-                .or_default()
-                .push("system_emoji".to_owned());
-            fonts
-                .families
-                .entry(FontFamily::Monospace)
-                .or_default()
-                .push("system_emoji".to_owned());
-        }
-
+        append_symbol_fallbacks(&mut fonts);
         fonts
     } else if let Some(file_path) = resolve_font_path(font_name)
         && let Ok(bytes) = std::fs::read(&file_path)
     {
         let mut font_defs = FontDefinitions::default();
         let font_key = format!("sys_font_{}", font_name);
-
-        if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
-            font_defs.font_data.insert(
-                "system_emoji".to_owned(),
-                FontData::from_owned((*emoji_bytes).clone()).into(),
-            );
-        }
 
         font_defs
             .font_data
@@ -303,19 +340,7 @@ fn build_font_definitions(font_name: &str) -> FontDefinitions {
             .or_default()
             .insert(0, font_key);
 
-        if font_defs.font_data.contains_key("system_emoji") {
-            font_defs
-                .families
-                .entry(FontFamily::Proportional)
-                .or_default()
-                .push("system_emoji".to_owned());
-            font_defs
-                .families
-                .entry(FontFamily::Monospace)
-                .or_default()
-                .push("system_emoji".to_owned());
-        }
-
+        append_symbol_fallbacks(&mut font_defs);
         font_defs
     } else {
         FontDefinitions::default()

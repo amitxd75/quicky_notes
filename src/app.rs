@@ -86,6 +86,21 @@ pub struct QuickyNotesApp {
     /// Dedicated receiver for AI provider connection testing.
     pub ai_test_rx: Option<mpsc::Receiver<crate::ai::AiResult>>,
 
+    /// Receiver for async AI custom theme generation.
+    pub ai_theme_rx: Option<mpsc::Receiver<Result<crate::engine::GeneratedTheme, String>>>,
+
+    /// User prompt input buffer for AI theme generation.
+    pub ai_theme_prompt: String,
+
+    /// Suggestion engine for inline ghost writing autocomplete.
+    pub suggestion_engine: crate::suggest::SuggestionEngine,
+
+    /// Receiver for async background loading of the suggestion engine dictionary.
+    pub suggestion_rx: Option<mpsc::Receiver<crate::suggest::SuggestionEngine>>,
+
+    /// Current active ghost completion suffix displayed at the cursor.
+    pub active_ghost_suffix: Option<String>,
+
     /// Last recorded cursor selection character range `(start_idx, end_idx)`.
     pub last_cursor_range: Option<(usize, usize)>,
 
@@ -108,6 +123,10 @@ impl QuickyNotesApp {
 
         // Load fonts asynchronously on a background thread to avoid startup delay
         let font_rx = crate::font::setup_fonts_async(&cc.egui_ctx, &data.settings.selected_font);
+
+        // Pre-index existing notes and load dictionary asynchronously
+        let note_texts = data.notes.iter().map(|n| n.content.clone()).collect();
+        let suggest_rx = crate::suggest::SuggestionEngine::start_async_load(note_texts);
 
         Self {
             data,
@@ -134,6 +153,11 @@ impl QuickyNotesApp {
             toast: None,
             ai_modal: crate::ui::ai_modal::AiModalState::default(),
             ai_test_rx: None,
+            ai_theme_rx: None,
+            ai_theme_prompt: String::new(),
+            suggestion_engine: crate::suggest::SuggestionEngine::default(),
+            suggestion_rx: Some(suggest_rx),
+            active_ghost_suffix: None,
             last_cursor_range: None,
             last_window_size_check: Instant::now(),
         }
@@ -263,7 +287,9 @@ impl QuickyNotesApp {
             return;
         }
 
-        if self.data.settings.trim_trailing_whitespace {
+        // Only trim trailing whitespace on EXPLICIT manual save (force == true),
+        // NEVER during background auto-save while the user is actively typing!
+        if force && self.data.settings.trim_trailing_whitespace {
             for note in &mut self.data.notes {
                 if note
                     .content
@@ -341,6 +367,14 @@ impl QuickyNotesApp {
             self.font_loading_rx = None;
         }
 
+        // Poll for async suggestion engine dictionary loading
+        if let Some(rx) = &self.suggestion_rx
+            && let Ok(engine) = rx.try_recv()
+        {
+            self.suggestion_engine = engine;
+            self.suggestion_rx = None;
+        }
+
         // Poll for async AI test connection results
         if let Some(rx) = &self.ai_test_rx
             && let Ok(result) = rx.try_recv()
@@ -363,8 +397,33 @@ impl QuickyNotesApp {
             ctx.request_repaint();
         }
 
+        // Poll for async AI theme generation results
+        if let Some(rx) = &self.ai_theme_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.ai_theme_rx = None;
+            match result {
+                Ok(theme) => {
+                    self.data.settings.apply_generated_theme(&theme);
+                    theme::setup_glassmorphism_theme(ctx, &self.data.settings);
+                    self.show_toast(
+                        format!("🎨 Applied AI Theme: {}", theme.name),
+                        crate::ui::toast::ToastKind::Success,
+                    );
+                    self.is_dirty = true;
+                }
+                Err(err) => {
+                    self.show_toast(
+                        format!("Theme Generation Failed: {}", err),
+                        crate::ui::toast::ToastKind::Error,
+                    );
+                }
+            }
+            ctx.request_repaint();
+        }
+
         // Keep frame loop reactive while background AI requests are in flight
-        if self.ai_test_rx.is_some() || self.ai_modal.is_loading {
+        if self.ai_test_rx.is_some() || self.ai_modal.is_loading || self.ai_theme_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
 
@@ -467,6 +526,11 @@ mod tests {
             toast: None,
             ai_modal: crate::ui::ai_modal::AiModalState::default(),
             ai_test_rx: None,
+            ai_theme_rx: None,
+            ai_theme_prompt: String::new(),
+            suggestion_engine: crate::suggest::SuggestionEngine::default(),
+            suggestion_rx: None,
+            active_ghost_suffix: None,
             last_cursor_range: None,
             last_window_size_check: Instant::now(),
         }

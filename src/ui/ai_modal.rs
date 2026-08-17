@@ -463,14 +463,65 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
 
                                     preview_frame.show(ui, |ui| {
                                         ui.set_width(ui.available_width());
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(preview)
-                                                    .font(FontId::monospace(12.0))
-                                                    .color(Color32::from_rgb(230, 235, 245)),
+
+                                        let active_lang = if let Some(note) = app.active_note() {
+                                            crate::ui::syntax::detect_language(
+                                                &note.title,
+                                                note.file_path.as_deref(),
                                             )
-                                            .wrap(),
-                                        );
+                                        } else {
+                                            ""
+                                        };
+
+                                        let is_markdown = active_lang == "md"
+                                            || preview.contains("```")
+                                            || preview.starts_with("# ")
+                                            || preview.starts_with("## ");
+
+                                        if is_markdown {
+                                            crate::ui::markdown::render_markdown(
+                                                ui,
+                                                preview,
+                                                app.data.settings.font_size.clamp(11.0, 15.0),
+                                                app.data.settings.monospace_font,
+                                                &palette,
+                                            );
+                                        } else if !active_lang.is_empty() {
+                                            let code_font_size =
+                                                app.data.settings.font_size.clamp(11.0, 15.0);
+                                            let code_theme =
+                                                egui_extras::syntax_highlighting::CodeTheme::dark(
+                                                    code_font_size,
+                                                );
+                                            let font_id = if app.data.settings.monospace_font {
+                                                FontId::monospace(code_font_size)
+                                            } else {
+                                                FontId::proportional(code_font_size)
+                                            };
+                                            let opts = crate::ui::syntax::HighlightOptions {
+                                                theme: &code_theme,
+                                                language: active_lang,
+                                                font_id,
+                                                text_color: Color32::from_rgb(235, 240, 250),
+                                                wrap_width: ui.available_width(),
+                                            };
+                                            let layout_job = crate::ui::syntax::highlight_text(
+                                                ui.ctx(),
+                                                ui.style(),
+                                                preview,
+                                                opts,
+                                            );
+                                            ui.label(layout_job);
+                                        } else {
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(preview)
+                                                        .font(FontId::monospace(12.0))
+                                                        .color(Color32::from_rgb(230, 235, 245)),
+                                                )
+                                                .wrap(),
+                                            );
+                                        }
                                     });
                                 });
 

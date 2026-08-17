@@ -34,40 +34,16 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     0.15,
                 );
 
-                // Smooth active tab background and border tinting using palette.accent
-                let active_r = (palette.card.r() as f32 * (1.0 - active_anim)
-                    + (palette.accent.r() as f32 * 0.35 + palette.card.r() as f32 * 0.65)
-                        * active_anim) as u8;
-                let active_g = (palette.card.g() as f32 * (1.0 - active_anim)
-                    + (palette.accent.g() as f32 * 0.35 + palette.card.g() as f32 * 0.65)
-                        * active_anim) as u8;
-                let active_b = (palette.card.b() as f32 * (1.0 - active_anim)
-                    + (palette.accent.b() as f32 * 0.35 + palette.card.b() as f32 * 0.65)
-                        * active_anim) as u8;
+                // Smooth active tab background and border tinting using palette helpers
+                let active_tint = theme::Palette::interpolate_color(palette.card, palette.accent, 0.35);
+                let base_tab_bg = theme::Palette::with_alpha(palette.card, 160);
+                let target_tab_bg = theme::Palette::with_alpha(active_tint, 240);
+                let tab_bg = theme::Palette::interpolate_color(base_tab_bg, target_tab_bg, active_anim);
 
-                let tab_bg = Color32::from_rgba_unmultiplied(
-                    active_r,
-                    active_g,
-                    active_b,
-                    (160.0 + active_anim * 80.0) as u8,
-                );
-
-                let stroke_r = (palette.border.r() as f32 * (1.0 - active_anim)
-                    + palette.accent.r() as f32 * active_anim) as u8;
-                let stroke_g = (palette.border.g() as f32 * (1.0 - active_anim)
-                    + palette.accent.g() as f32 * active_anim) as u8;
-                let stroke_b = (palette.border.b() as f32 * (1.0 - active_anim)
-                    + palette.accent.b() as f32 * active_anim) as u8;
-
-                let tab_stroke = Stroke::new(
-                    1.0 + active_anim * 0.2,
-                    Color32::from_rgba_unmultiplied(
-                        stroke_r,
-                        stroke_g,
-                        stroke_b,
-                        (90.0 + active_anim * 90.0) as u8,
-                    ),
-                );
+                let base_stroke = theme::Palette::with_alpha(palette.border, 90);
+                let target_stroke = theme::Palette::with_alpha(palette.accent, 180);
+                let stroke_color = theme::Palette::interpolate_color(base_stroke, target_stroke, active_anim);
+                let tab_stroke = Stroke::new(1.0 + active_anim * 0.2, stroke_color);
 
                 let tab_frame = egui::Frame::NONE
                     .fill(tab_bg)
@@ -91,9 +67,8 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         }
 
                         // Editable Title or Clickable Label
-                        if is_editing {
+                        if is_editing && let Some((_, ref mut buf)) = app.editing_title {
                             // Use persistent buffer stored in app state across frames
-                            let buf = &mut app.editing_title.as_mut().unwrap().1;
                             let title_edit = egui::TextEdit::singleline(buf)
                                 .font(FontId::proportional(13.0))
                                 .text_color(Color32::WHITE)

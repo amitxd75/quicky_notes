@@ -119,22 +119,18 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
 
                             match app.settings_tab {
                                 SettingsTab::General => {
-                                    render_theme_palette_card(app, ctx, ui, &palette);
-                                    if app.data.settings.theme_mode == theme::ThemeMode::Custom {
-                                        render_custom_colors_card(app, ctx, ui, &palette);
-                                    }
-                                    render_appearance_card(app, ctx, ui, &palette);
-                                    render_editor_behavior_card(app, ctx, ui, &palette);
+                                    render_general_core_card(app, ctx, ui, &palette);
                                     render_quick_actions_card(app, ui, &palette);
                                 }
                                 SettingsTab::Appearance => {
                                     render_theme_palette_card(app, ctx, ui, &palette);
                                     if app.data.settings.theme_mode == theme::ThemeMode::Custom {
+                                        render_ai_theme_generator_card(app, ctx, ui, &palette);
                                         render_custom_colors_card(app, ctx, ui, &palette);
                                     }
-                                    render_system_font_card(app, ctx, ui, &palette);
-                                    render_window_presets_card(app, ctx, ui, &palette);
                                     render_appearance_card(app, ctx, ui, &palette);
+                                    render_window_presets_card(app, ctx, ui, &palette);
+                                    render_system_font_card(app, ctx, ui, &palette);
                                 }
                                 SettingsTab::Editor => {
                                     render_system_font_card(app, ctx, ui, &palette);
@@ -145,6 +141,7 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
                                 }
                                 SettingsTab::FilesBackup => {
                                     render_backup_info_card(ui, &palette);
+                                    render_learned_dictionary_card(app, ctx, ui, &palette);
                                     render_quick_actions_card(app, ui, &palette);
                                 }
                                 SettingsTab::Shortcuts => {
@@ -267,6 +264,214 @@ fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
         }
     });
 }
+
+/// Renders the essential, high-priority core settings in the General tab.
+fn render_general_core_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    card::settings_card(ui, "GENERAL & WORKSPACE ESSENTIALS", palette, |ui| {
+        // 1. Always on Top (Floating Mode)
+        if toggle::toggle_row(
+            ui,
+            "Always on Top (Floating Widget)",
+            &mut app.data.settings.always_on_top,
+            palette.accent,
+        )
+        .changed()
+        {
+            let level = if app.data.settings.always_on_top {
+                egui::WindowLevel::AlwaysOnTop
+            } else {
+                egui::WindowLevel::Normal
+            };
+            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 2. Ghost Writing Predictive Autocomplete
+        if toggle::toggle_row(
+            ui,
+            "Ghost Writing Autocomplete (Tab)",
+            &mut app.data.settings.enable_ghost_text,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 3. Real-time Syntax Highlighting
+        if toggle::toggle_row(
+            ui,
+            "Code & Markdown Syntax Colors",
+            &mut app.data.settings.enable_syntax_highlighting,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 4. Show Line Numbers
+        if toggle::toggle_row(
+            ui,
+            "Show Line Numbers in Gutter",
+            &mut app.data.settings.show_line_numbers,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 5. Default New Note Extension
+        let mut ext = app.data.settings.default_extension.clone();
+        if button::selection_row(
+            ui,
+            "Default Note Format",
+            &mut ext,
+            [
+                (".txt Text", ".txt".to_string()),
+                (".md Markdown", ".md".to_string()),
+            ],
+            palette,
+        ) {
+            app.data.settings.default_extension = ext;
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 6. Tab Indentation Width
+        if button::selection_row(
+            ui,
+            "Tab Indentation Width",
+            &mut app.data.settings.tab_size,
+            [("2 sp", 2), ("4 sp", 4), ("8 sp", 8)],
+            palette,
+        ) {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // 7. Window Opacity Slider
+        let opacity_pct = (app.data.settings.opacity * 100.0) as u32;
+        let opacity_str = format!("{}%", opacity_pct);
+        if slider::slider_row(
+            ui,
+            "Window Opacity",
+            &opacity_str,
+            &mut app.data.settings.opacity,
+            0.15..=1.0,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.data.settings.validate_and_clamp();
+            theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+    });
+}
+
+/// Renders a sleek, compact AI Theme Generator card for custom theme generation.
+fn render_ai_theme_generator_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    card::settings_card(ui, "✨ AI THEME GENERATOR", palette, |ui| {
+        let is_generating = app.ai_theme_rx.is_some();
+
+        // 1. Compact Prompt Row + Inline Generate Button
+        ui.horizontal(|ui| {
+            let prompt_edit = egui::TextEdit::singleline(&mut app.ai_theme_prompt)
+                .hint_text(
+                    "Theme description (e.g. Cyberpunk neon, Nordic moss, Sunset Horizon)...",
+                )
+                .font(FontId::proportional(12.0))
+                .desired_width((ui.available_width() - 110.0).max(100.0));
+            ui.add(prompt_edit);
+
+            let btn_label = if is_generating {
+                "⏳ Generating"
+            } else {
+                "✨ Generate"
+            };
+            let gen_btn =
+                button::animated_primary_button(ui, btn_label, palette, egui::vec2(105.0, 26.0));
+
+            if gen_btn.clicked() && !is_generating {
+                let prompt = if app.ai_theme_prompt.trim().is_empty() {
+                    "Sleek modern dark glassmorphism palette with vibrant accents".to_string()
+                } else {
+                    app.ai_theme_prompt.trim().to_string()
+                };
+
+                let rx = crate::engine::spawn_generate_theme_request(
+                    prompt,
+                    app.data.settings.ai.provider,
+                    app.data.settings.ai.model.clone(),
+                    app.data.settings.ai.api_key.clone(),
+                );
+                app.ai_theme_rx = Some(rx);
+                app.show_toast(
+                    "AI is designing your custom theme...",
+                    crate::ui::toast::ToastKind::Info,
+                );
+                ctx.request_repaint();
+            }
+        });
+
+        ui.add_space(4.0);
+
+        // 2. Compact Inspiration Presets
+        let inspiration_presets = [
+            (
+                "⚡ Cyberpunk",
+                "Vivid cyberpunk Tokyo high-contrast neon cyan, magenta, and deep purple obsidian",
+            ),
+            (
+                "❄ Nordic",
+                "Muted Scandinavian deep pine forest, morning mist, and lichen stone",
+            ),
+            (
+                "☕ Autumn",
+                "Warm vintage parchment, roasted espresso, amber glow, and cinnamon brown",
+            ),
+            (
+                "◆ Obsidian",
+                "Sleek jet-black OLED dark mode with glowing electric amber and golden accents",
+            ),
+            (
+                "✿ Sakura",
+                "Soft Tokyo sakura blossoms, pastel pink, lavender dusk, and slate glass",
+            ),
+            (
+                "⌨ Terminal",
+                "Monochrome phosphor emerald green, hacker terminal matrix aesthetics",
+            ),
+        ];
+
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            for (label, prompt_text) in inspiration_presets {
+                if button::glass_chip_button(ui, label, palette).clicked() {
+                    app.ai_theme_prompt = prompt_text.to_string();
+                }
+            }
+        });
+    });
+}
+
 /// Renders the Theme & Color Palette selection card with checkmarks.
 fn render_theme_palette_card(
     app: &mut QuickyNotesApp,
@@ -496,6 +701,24 @@ fn render_appearance_card(
             ctx.request_repaint();
         }
 
+        // Glass Blur Strength / Hardness Slider
+        let blur_pct = (app.data.settings.blur_strength * 100.0) as u32;
+        if slider::slider_row(
+            ui,
+            "Glass Blur & Hardness",
+            &format!("{}%", blur_pct),
+            &mut app.data.settings.blur_strength,
+            0.0..=1.0,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.data.settings.validate_and_clamp();
+            theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
         // Window Corner Radius Slider
         let radius_str = format!("{:.0}px", app.data.settings.corner_radius);
         if slider::slider_row(
@@ -665,6 +888,19 @@ fn render_editor_behavior_card(
             ctx.request_repaint();
         }
 
+        // Ghost Autocomplete Suggestions
+        if toggle::toggle_row(
+            ui,
+            "Ghost Autocomplete (Tab to accept)",
+            &mut app.data.settings.enable_ghost_text,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
         // Auto Save Interval Slider
         let auto_save_str = format!("{}s", app.data.settings.auto_save_seconds);
         if slider::slider_row_u32(
@@ -799,6 +1035,9 @@ fn render_ai_settings_card(
                 ),
         );
 
+        let reveal_id = egui::Id::new("reveal_ai_api_key");
+        let mut show_key = ui.data(|d| d.get_temp::<bool>(reveal_id).unwrap_or(false));
+
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("API Key:")
@@ -806,12 +1045,23 @@ fn render_ai_settings_card(
                     .color(Color32::from_gray(210)),
             );
             let key_edit = egui::TextEdit::singleline(&mut app.data.settings.ai.api_key)
-                .password(true)
+                .password(!show_key)
                 .hint_text("sk-...")
                 .font(FontId::monospace(12.0))
-                .desired_width(ui.available_width());
+                .desired_width(ui.available_width() - 40.0);
             if ui.add(key_edit).changed() {
                 app.is_dirty = true;
+            }
+
+            let toggle_icon = if show_key { "🙈" } else { "👁" };
+            let tip = if show_key {
+                "Hide API Key"
+            } else {
+                "Reveal API Key"
+            };
+            if ui.button(toggle_icon).on_hover_text(tip).clicked() {
+                show_key = !show_key;
+                ui.data_mut(|d| d.insert_temp(reveal_id, show_key));
             }
         });
 
@@ -890,9 +1140,16 @@ fn render_quick_actions_card(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
 /// Renders file persistence, data directory opening, and backup info card.
 fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
     card::settings_card(ui, "STORAGE & DURABILITY", palette, |ui| {
-        let path = crate::storage::AppData::config_path();
+        let cfg_path = crate::storage::AppData::config_path();
+        let db_path = crate::storage::AppData::db_path();
+
         ui.label(
-            RichText::new(format!("Config Path: {}", path.to_string_lossy()))
+            RichText::new(format!("◆ SQLite DB:   {}", db_path.to_string_lossy()))
+                .font(FontId::monospace(10.5))
+                .color(Color32::from_gray(190)),
+        );
+        ui.label(
+            RichText::new(format!("⚙ Config JSON: {}", cfg_path.to_string_lossy()))
                 .font(FontId::monospace(10.5))
                 .color(Color32::from_gray(190)),
         );
@@ -901,13 +1158,13 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
 
         let open_folder_btn = button::animated_action_button(
             ui,
-            "📂 Open Data Folder in File Manager",
+            "📁 Open Data Folder in File Manager",
             palette,
             egui::vec2(ui.available_width(), 32.0),
         );
 
         if open_folder_btn.clicked()
-            && let Some(parent) = path.parent()
+            && let Some(parent) = db_path.parent()
         {
             crate::ui::drag_drop::safe_open_folder(parent);
         }
@@ -915,10 +1172,93 @@ fn render_backup_info_card(ui: &mut Ui, palette: &theme::Palette) {
         ui.add_space(4.0);
 
         ui.label(
-            RichText::new("✓ Atomic save with PID temp file swap\n✓ Corrupt configuration auto-backup recovery\n✓ Zero-data-loss safe disk serialization")
+            RichText::new("✓ SQLite ACID transactional persistence for all notes\n✓ Encrypted / machine-salted API key storage\n✓ Atomic config.json writes with corruption recovery")
                 .font(FontId::proportional(11.5))
                 .color(Color32::from_gray(180)),
         );
+    });
+}
+
+/// Renders the Learned Custom Vocabulary, Markov N-Gram stats, and re-indexing card.
+fn render_learned_dictionary_card(
+    app: &mut QuickyNotesApp,
+    ctx: &egui::Context,
+    ui: &mut Ui,
+    palette: &theme::Palette,
+) {
+    card::settings_card(ui, "✦ LEARNED VOCABULARY & DICTIONARY", palette, |ui| {
+        let (bigrams, trigrams) = app.suggestion_engine.transition_counts();
+        let word_count = app.suggestion_engine.word_count();
+
+        ui.label(
+            RichText::new(
+                "Real-time statistical Markov language model auto-trained from your notes:",
+            )
+            .font(FontId::proportional(11.5))
+            .color(Color32::from_gray(190)),
+        );
+
+        ui.add_space(4.0);
+
+        // Stats grid
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("✦ Total Vocabulary: {} words", word_count))
+                    .font(FontId::monospace(11.0))
+                    .color(palette.accent),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "🔗 Learned Markov Transitions: {} bigrams, {} trigrams",
+                    bigrams, trigrams
+                ))
+                .font(FontId::monospace(11.0))
+                .color(Color32::from_gray(210)),
+            );
+        });
+
+        ui.add_space(6.0);
+
+        // Action Buttons: Re-train & Reset
+        ui.horizontal(|ui| {
+            let retrain_btn = button::animated_action_button(
+                ui,
+                "🔄 Re-Index from Notes",
+                palette,
+                egui::vec2((ui.available_width() - 8.0) * 0.60, 30.0),
+            );
+
+            if retrain_btn.clicked() {
+                let all_contents: Vec<String> =
+                    app.data.notes.iter().map(|n| n.content.clone()).collect();
+                let count = all_contents.len();
+                app.suggestion_engine
+                    .retrain_from_notes(all_contents.iter().map(|s| s.as_str()));
+                app.show_toast(
+                    format!("✓ Re-indexed & trained vocabulary from {} notes", count),
+                    crate::ui::toast::ToastKind::Success,
+                );
+                ctx.request_repaint();
+            }
+
+            let clear_btn = button::animated_action_button(
+                ui,
+                "🗑 Reset Model",
+                palette,
+                egui::vec2(ui.available_width(), 30.0),
+            );
+
+            if clear_btn.clicked() {
+                app.suggestion_engine = crate::suggest::SuggestionEngine::new();
+                app.show_toast(
+                    "Learned Markov transitions reset to base dictionary",
+                    crate::ui::toast::ToastKind::Info,
+                );
+                ctx.request_repaint();
+            }
+        });
     });
 }
 
@@ -938,7 +1278,7 @@ fn render_shortcuts_card(
     // Header banner with instructions and global reset button
     card::settings_card(ui, "KEYBOARD SHORTCUTS MANAGER", palette, |ui| {
         let avail_w = ui.available_width();
-        let is_compact = avail_w < 400.0;
+        let is_compact = avail_w < 480.0;
 
         if is_compact {
             ui.vertical(|ui| {
@@ -986,7 +1326,7 @@ fn render_shortcuts_card(
                         ui,
                         "↺ Reset All to Defaults",
                         palette,
-                        egui::vec2(150.0, 26.0),
+                        egui::vec2(175.0, 26.0),
                     );
                     if reset_btn
                         .on_hover_text("Restore all default keyboard shortcuts")
@@ -1060,14 +1400,23 @@ fn render_shortcuts_card(
                 let is_modified = current_binding != default_binding;
                 let is_recording = app.recording_shortcut == Some(action);
                 let conflict = app.data.settings.keybindings.find_conflict(action);
+                let display_text = current_binding.to_display_string();
+
+                let font = FontId::monospace(11.5);
+                let measured_text_width = ui.fonts_mut(|f| {
+                    f.layout_no_wrap(display_text.clone(), font, Color32::WHITE)
+                        .size()
+                        .x
+                });
+                let badge_width = (measured_text_width + 24.0).max(105.0);
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
 
                     let right_width = if is_modified && !is_recording {
-                        110.0 + 26.0 + 8.0
+                        badge_width + 26.0 + 8.0
                     } else {
-                        110.0 + 8.0
+                        badge_width + 8.0
                     };
                     let left_width = (ui.available_width() - right_width).max(60.0);
 
@@ -1095,11 +1444,11 @@ fn render_shortcuts_card(
                         // Keybinding click-to-rebind badge button
                         let bind_btn = button::animated_shortcut_badge(
                             ui,
-                            &current_binding.to_display_string(),
+                            &display_text,
                             is_recording,
                             is_modified,
                             palette,
-                            egui::vec2(110.0, 24.0),
+                            egui::vec2(badge_width, 24.0),
                         );
 
                         if bind_btn

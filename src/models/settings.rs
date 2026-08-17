@@ -28,6 +28,13 @@ pub const MIN_AUTO_SAVE_SECS: u32 = 1;
 /// Maximum allowed auto-save interval in seconds.
 pub const MAX_AUTO_SAVE_SECS: u32 = 60;
 
+/// Minimum allowed glass blur strength / hardness.
+pub const MIN_BLUR_STRENGTH: f32 = 0.0;
+/// Maximum allowed glass blur strength / hardness.
+pub const MAX_BLUR_STRENGTH: f32 = 1.0;
+/// Default glass blur strength / hardness.
+pub const DEFAULT_BLUR_STRENGTH: f32 = 0.75;
+
 /// Pre-defined window dimension presets for Quicky Notes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowSizePreset {
@@ -172,8 +179,8 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub confirm_close_tab: bool,
 
-    /// Whether to automatically trim trailing spaces on save.
-    #[serde(default = "default_true")]
+    /// Whether to automatically trim trailing spaces on manual save.
+    #[serde(default = "default_false")]
     pub trim_trailing_whitespace: bool,
 
     /// Glass window corner radius roundness in pixels (4.0 ..= 24.0).
@@ -195,10 +202,26 @@ pub struct AppSettings {
     /// Whether to enable real-time language syntax highlighting in the editor.
     #[serde(default = "default_true")]
     pub enable_syntax_highlighting: bool,
+
+    /// Whether to display inline ghost autocomplete suggestions.
+    #[serde(default = "default_true")]
+    pub enable_ghost_text: bool,
+
+    /// Glass blur hardness and surface specular strength (0.0 ..= 1.0).
+    #[serde(default = "default_blur_strength")]
+    pub blur_strength: f32,
+}
+
+const fn default_blur_strength() -> f32 {
+    DEFAULT_BLUR_STRENGTH
 }
 
 const fn default_true() -> bool {
     true
+}
+
+const fn default_false() -> bool {
+    false
 }
 const fn default_tab_size() -> u32 {
     4
@@ -235,12 +258,14 @@ impl Default for AppSettings {
             tab_size: 4,
             show_status_bar: true,
             confirm_close_tab: true,
-            trim_trailing_whitespace: true,
+            trim_trailing_whitespace: false,
             corner_radius: 14.0,
             default_extension: ".txt".to_string(),
             keybindings: crate::ui::shortcuts::KeyBindings::default(),
             ai: crate::ai::AiSettings::default(),
             enable_syntax_highlighting: true,
+            enable_ghost_text: true,
+            blur_strength: DEFAULT_BLUR_STRENGTH,
         }
     }
 }
@@ -254,6 +279,14 @@ impl AppSettings {
             self.opacity = 0.85;
         } else {
             self.opacity = self.opacity.clamp(MIN_OPACITY, MAX_OPACITY);
+        }
+
+        if self.blur_strength.is_nan() {
+            self.blur_strength = DEFAULT_BLUR_STRENGTH;
+        } else {
+            self.blur_strength = self
+                .blur_strength
+                .clamp(MIN_BLUR_STRENGTH, MAX_BLUR_STRENGTH);
         }
 
         if self.font_size.is_nan() {
@@ -295,6 +328,43 @@ impl AppSettings {
         if self.selected_font.trim().is_empty() {
             self.selected_font = "Default".to_string();
         }
+    }
+
+    /// Applies an AI-generated theme specification cleanly into custom settings.
+    pub fn apply_generated_theme(&mut self, theme: &crate::engine::GeneratedTheme) {
+        if let Some(bg) = crate::engine::parse_hex_color(&theme.bg) {
+            self.custom_bg_color = bg;
+        }
+        if let Some(card) = crate::engine::parse_hex_color(&theme.card) {
+            self.custom_card_color = card;
+        }
+        if let Some(border) = crate::engine::parse_hex_color(&theme.border) {
+            self.custom_border_color = border;
+        }
+        if let Some(accent) = crate::engine::parse_hex_color(&theme.accent) {
+            self.custom_accent_color = accent;
+        }
+        if let Some(sec) = crate::engine::parse_hex_color(&theme.secondary_accent) {
+            self.custom_secondary_accent_color = sec;
+        }
+        if let Some(text) = crate::engine::parse_hex_color(&theme.text) {
+            self.custom_text_color = text;
+        }
+        if let Some(muted) = crate::engine::parse_hex_color(&theme.muted_text) {
+            self.custom_muted_text_color = muted;
+        }
+        if let Some(danger) = crate::engine::parse_hex_color(&theme.danger) {
+            self.custom_danger_color = danger;
+        }
+        if let Some(op) = theme.opacity {
+            self.opacity = op;
+        }
+        if let Some(blur) = theme.blur_strength {
+            self.blur_strength = blur;
+        }
+
+        self.theme_mode = crate::theme::ThemeMode::Custom;
+        self.validate_and_clamp();
     }
 }
 

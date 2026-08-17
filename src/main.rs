@@ -3,16 +3,22 @@
 //! Entry point for initializing application settings, window options, eframe runner,
 //! and Hyprland Wayland viewport configuration.
 
-mod ai;
 mod app;
-mod components;
-mod crash;
-mod font;
-mod note;
-mod settings;
-mod storage;
-mod theme;
-mod ui;
+pub mod components;
+pub mod engine;
+pub mod models;
+pub mod platform;
+pub mod storage;
+pub mod theme;
+pub mod ui;
+
+// Top-level re-exports for clean ergonomic access across submodules
+pub use engine::ai;
+pub use engine::suggest;
+pub use models::note;
+pub use models::settings;
+pub use platform::crash;
+pub use platform::font;
 
 use app::QuickyNotesApp;
 use eframe::egui;
@@ -20,7 +26,7 @@ use eframe::egui;
 /// Main application entry point.
 /// Loads saved settings/notes from disk and starts the `eframe` event loop.
 fn main() -> Result<(), eframe::Error> {
-    crash::install_crash_handler();
+    platform::install_crash_handler();
 
     let data = storage::AppData::load();
     let width = data.settings.window_width;
