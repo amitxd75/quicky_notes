@@ -146,8 +146,11 @@ impl QuickyNotesApp {
         }
 
         // Load fonts asynchronously on a background thread to avoid startup delay
-        let font_rx =
-            crate::font::setup_fonts_async(&cc.egui_ctx, &data.settings.appearance.selected_font);
+        let font_rx = crate::font::setup_fonts_async(
+            &cc.egui_ctx,
+            &data.settings.appearance.selected_font,
+            &data.settings.editor.editor_font,
+        );
 
         // Pre-index existing notes and load dictionary asynchronously
         let note_texts = data.notes.iter().map(|n| n.content.clone()).collect();

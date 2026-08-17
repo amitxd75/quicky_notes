@@ -594,12 +594,41 @@ pub fn setup_glassmorphism_theme(ctx: &Context, settings: &AppSettings) {
     visuals.window_corner_radius = CornerRadius::same(radius);
 
     ctx.set_visuals(visuals.clone());
-    let style = Style {
+
+    let ui_size = settings.appearance.ui_font_size;
+    let scale = (ui_size / crate::models::settings::DEFAULT_UI_FONT_SIZE).clamp(0.65, 2.0);
+
+    let mut style = Style {
         visuals,
         ..Style::default()
     };
 
-    ctx.set_style_of(eframe::egui::Theme::Dark, style);
+    style.text_styles = [
+        (
+            egui::TextStyle::Small,
+            egui::FontId::proportional(11.0 * scale),
+        ),
+        (
+            egui::TextStyle::Body,
+            egui::FontId::proportional(13.5 * scale),
+        ),
+        (
+            egui::TextStyle::Button,
+            egui::FontId::proportional(13.0 * scale),
+        ),
+        (
+            egui::TextStyle::Heading,
+            egui::FontId::proportional(18.0 * scale),
+        ),
+        (
+            egui::TextStyle::Monospace,
+            egui::FontId::monospace(settings.editor.font_size),
+        ),
+    ]
+    .into();
+
+    ctx.set_style_of(eframe::egui::Theme::Dark, style.clone());
+    ctx.set_style_of(eframe::egui::Theme::Light, style);
 }
 
 #[cfg(test)]

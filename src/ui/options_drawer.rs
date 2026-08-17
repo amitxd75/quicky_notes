@@ -741,18 +741,18 @@ fn render_custom_colors_card(
     });
 }
 
-/// Renders the System Font selection combo box card.
+/// Renders the System & UI Typography card with font family and size scaling.
 fn render_system_font_card(
     app: &mut QuickyNotesApp,
     ctx: &egui::Context,
     ui: &mut Ui,
     palette: &theme::Palette,
 ) {
-    card::settings_card(ui, "SYSTEM FONT", palette, |ui| {
+    card::settings_card(ui, "SYSTEM & UI TYPOGRAPHY", palette, |ui| {
         let fonts = crate::font::get_installed_system_fonts();
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Active Font Family")
+                RichText::new("System UI Font Family")
                     .font(FontId::proportional(12.5))
                     .color(Color32::from_gray(230)),
             );
@@ -774,9 +774,10 @@ fn render_system_font_card(
                             )
                             .clicked()
                         {
-                            crate::font::apply_system_font(
+                            crate::font::apply_system_fonts(
                                 ctx,
                                 &app.data.settings.appearance.selected_font,
+                                &app.data.settings.editor.editor_font,
                             );
                             app.is_dirty = true;
                             ctx.request_repaint();
@@ -785,6 +786,26 @@ fn render_system_font_card(
                 });
             });
         });
+
+        ui.add_space(4.0);
+
+        // System UI Font Size Slider
+        let ui_size_str = format!("{:.1}pt", app.data.settings.appearance.ui_font_size);
+        if slider::slider_row(
+            ui,
+            "System UI Font Size",
+            &ui_size_str,
+            &mut app.data.settings.appearance.ui_font_size,
+            crate::models::settings::MIN_UI_FONT_SIZE..=crate::models::settings::MAX_UI_FONT_SIZE,
+            palette.accent,
+        )
+        .changed()
+        {
+            app.data.settings.validate_and_clamp();
+            theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
     });
 }
 
@@ -952,11 +973,52 @@ fn render_editor_behavior_card(
     palette: &theme::Palette,
 ) {
     card::settings_card(ui, "EDITOR BEHAVIOR & TYPOGRAPHY", palette, |ui| {
+        // Buffer / Coding Font Family Chooser
+        let mono_fonts = crate::font::get_installed_monospace_fonts();
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Buffer Font Family")
+                    .font(FontId::proportional(12.5))
+                    .color(Color32::from_gray(230)),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let current_editor_font = app.data.settings.editor.editor_font.clone();
+                let font_combo = egui::ComboBox::from_id_salt("editor_font_select").selected_text(
+                    RichText::new(&current_editor_font)
+                        .font(FontId::monospace(12.0))
+                        .color(Color32::WHITE),
+                );
+
+                font_combo.show_ui(ui, |ui| {
+                    for f_name in mono_fonts {
+                        if ui
+                            .selectable_value(
+                                &mut app.data.settings.editor.editor_font,
+                                f_name.clone(),
+                                &f_name,
+                            )
+                            .clicked()
+                        {
+                            crate::font::apply_system_fonts(
+                                ctx,
+                                &app.data.settings.appearance.selected_font,
+                                &app.data.settings.editor.editor_font,
+                            );
+                            app.is_dirty = true;
+                            ctx.request_repaint();
+                        }
+                    }
+                });
+            });
+        });
+
+        ui.add_space(4.0);
+
         // Font Size Slider
         let font_str = format!("{:.0}pt", app.data.settings.editor.font_size);
         if slider::slider_row(
             ui,
-            "Editor Font Size",
+            "Buffer Font Size",
             &font_str,
             &mut app.data.settings.editor.font_size,
             8.0..=36.0,

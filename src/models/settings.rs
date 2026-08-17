@@ -17,6 +17,13 @@ pub const MAX_FONT_SIZE: f32 = 36.0;
 /// Default editor font size in points.
 pub const DEFAULT_FONT_SIZE: f32 = 16.0;
 
+/// Minimum allowed system/UI font size in points.
+pub const MIN_UI_FONT_SIZE: f32 = 10.0;
+/// Maximum allowed system/UI font size in points.
+pub const MAX_UI_FONT_SIZE: f32 = 24.0;
+/// Default system/UI font size in points.
+pub const DEFAULT_UI_FONT_SIZE: f32 = 13.5;
+
 /// Minimum allowed window width in pixels.
 pub const MIN_WINDOW_WIDTH: f32 = 480.0;
 /// Minimum allowed window height in pixels.
@@ -124,6 +131,7 @@ impl WindowSizePreset {
 
 /// Custom theme color palette for user-defined styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CustomThemeColors {
     /// Background surface color [R, G, B].
     pub bg: [u8; 3],
@@ -160,6 +168,7 @@ impl Default for CustomThemeColors {
 
 /// General application, system startup, and workspace defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GeneralSettings {
     /// Whether Quicky Notes is registered in ~/.config/autostart for system login.
     pub autostart: bool,
@@ -205,6 +214,7 @@ impl GeneralSettings {
 
 /// Visual appearance, glassmorphism styling, and active palette configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppearanceSettings {
     /// Selected theme mode (Wallpaper sync, custom, or preset palette).
     pub theme_mode: ThemeMode,
@@ -214,8 +224,10 @@ pub struct AppearanceSettings {
     pub blur_strength: f32,
     /// Glass window corner radius roundness in pixels (4.0 ..= 24.0).
     pub corner_radius: f32,
-    /// Selected system font family name.
+    /// Selected system / UI font family name.
     pub selected_font: String,
+    /// System / UI font size in points (10.0 ..= 24.0).
+    pub ui_font_size: f32,
     /// Custom theme color palette tokens.
     pub custom_colors: CustomThemeColors,
 }
@@ -228,6 +240,7 @@ impl Default for AppearanceSettings {
             blur_strength: DEFAULT_BLUR_STRENGTH,
             corner_radius: DEFAULT_CORNER_RADIUS,
             selected_font: "Default".to_string(),
+            ui_font_size: DEFAULT_UI_FONT_SIZE,
             custom_colors: CustomThemeColors::default(),
         }
     }
@@ -258,6 +271,12 @@ impl AppearanceSettings {
                 .clamp(MIN_CORNER_RADIUS, MAX_CORNER_RADIUS);
         }
 
+        if self.ui_font_size.is_nan() {
+            self.ui_font_size = DEFAULT_UI_FONT_SIZE;
+        } else {
+            self.ui_font_size = self.ui_font_size.clamp(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE);
+        }
+
         if self.selected_font.trim().is_empty() {
             self.selected_font = "Default".to_string();
         }
@@ -266,7 +285,10 @@ impl AppearanceSettings {
 
 /// Text editor typography, formatting, autocomplete, and view preferences.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EditorSettings {
+    /// Selected buffer / code editor font family name.
+    pub editor_font: String,
     /// Text editor font size in points (8.0 ..= 36.0).
     pub font_size: f32,
     /// Whether to use monospace font family for code editing.
@@ -294,6 +316,7 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
+            editor_font: "Default".to_string(),
             font_size: DEFAULT_FONT_SIZE,
             monospace_font: true,
             tab_size: DEFAULT_TAB_SIZE,
@@ -312,6 +335,10 @@ impl Default for EditorSettings {
 impl EditorSettings {
     /// Validates and clamps editor parameters to safe bounds.
     pub fn validate_and_clamp(&mut self) {
+        if self.editor_font.trim().is_empty() {
+            self.editor_font = "Default".to_string();
+        }
+
         if self.font_size.is_nan() {
             self.font_size = DEFAULT_FONT_SIZE;
         } else {
@@ -323,10 +350,10 @@ impl EditorSettings {
             .auto_save_seconds
             .clamp(MIN_AUTO_SAVE_SECS, MAX_AUTO_SAVE_SECS);
 
-        if self.default_extension != ".qn"
-            && self.default_extension != ".md"
-            && self.default_extension != ".txt"
-        {
+        let ext = self.default_extension.trim().to_lowercase();
+        if ext == ".md" || ext == ".txt" || ext == ".qn" {
+            self.default_extension = ext;
+        } else {
             self.default_extension = ".qn".to_string();
         }
     }
@@ -334,6 +361,7 @@ impl EditorSettings {
 
 /// Window dimensions and window-manager level properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct WindowSettings {
     /// Persistent window width in pixels.
     pub width: f32,
@@ -372,6 +400,7 @@ impl WindowSettings {
 
 /// Global user settings configuration container.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppSettings {
     /// General application behavior, startup, and workspace settings.
     pub general: GeneralSettings,
@@ -444,6 +473,8 @@ mod tests {
         let mut settings = AppSettings::default();
         settings.appearance.opacity = -5.0;
         settings.editor.font_size = 100.0;
+        settings.editor.editor_font = "   ".to_string();
+        settings.appearance.ui_font_size = 100.0;
         settings.editor.auto_save_seconds = 0;
         settings.window.width = 100.0;
         settings.window.height = 50.0;
@@ -456,6 +487,8 @@ mod tests {
 
         assert_eq!(settings.appearance.opacity, MIN_OPACITY);
         assert_eq!(settings.editor.font_size, MAX_FONT_SIZE);
+        assert_eq!(settings.editor.editor_font, "Default");
+        assert_eq!(settings.appearance.ui_font_size, MAX_UI_FONT_SIZE);
         assert_eq!(settings.editor.auto_save_seconds, MIN_AUTO_SAVE_SECS);
         assert_eq!(settings.window.width, MIN_WINDOW_WIDTH);
         assert_eq!(settings.window.height, MIN_WINDOW_HEIGHT);
@@ -463,6 +496,12 @@ mod tests {
         assert_eq!(settings.appearance.corner_radius, 24.0);
         assert_eq!(settings.editor.default_extension, ".qn");
         assert_eq!(settings.appearance.selected_font, "Default");
+
+        // Test min clamping for UI font size
+        let mut min_settings = AppSettings::default();
+        min_settings.appearance.ui_font_size = 1.0;
+        min_settings.validate_and_clamp();
+        assert_eq!(min_settings.appearance.ui_font_size, MIN_UI_FONT_SIZE);
 
         // Test max clamping
         let mut max_settings = AppSettings::default();
@@ -477,12 +516,16 @@ mod tests {
     fn test_settings_serialization_roundtrip() {
         let mut settings = AppSettings::default();
         settings.editor.font_size = 18.5;
+        settings.editor.editor_font = "JetBrains Mono".to_string();
+        settings.appearance.ui_font_size = 15.0;
         settings.appearance.theme_mode = ThemeMode::CyberpunkCyan;
 
         let json = serde_json::to_string(&settings).expect("Serialization failed");
         let loaded: AppSettings = serde_json::from_str(&json).expect("Deserialization failed");
 
         assert_eq!(loaded.editor.font_size, 18.5);
+        assert_eq!(loaded.editor.editor_font, "JetBrains Mono");
+        assert_eq!(loaded.appearance.ui_font_size, 15.0);
         assert_eq!(loaded.appearance.theme_mode, ThemeMode::CyberpunkCyan);
     }
 }

@@ -6,7 +6,10 @@ pub mod font;
 
 pub use cli::CliArgs;
 pub use crash::install_crash_handler;
-pub use font::setup_fonts_async;
+pub use font::{
+    apply_system_font, apply_system_fonts, get_installed_monospace_fonts,
+    get_installed_system_fonts, setup_fonts_async,
+};
 
 use std::path::PathBuf;
 
