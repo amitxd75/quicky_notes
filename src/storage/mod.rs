@@ -7,9 +7,11 @@
 
 pub mod crypto;
 pub mod db;
+pub mod linked_files;
 
 pub use crypto::{deobfuscate_key, obfuscate_key};
 pub use db::Database;
+pub use linked_files::{reconcile_linked_notes_from_disk, sync_linked_notes_to_disk};
 
 use crate::models::AppSettings;
 use crate::models::Note;
@@ -127,7 +129,7 @@ impl AppData {
         let settings = Self::load_settings_from_path(config_path);
 
         // 2. Load notes from SQLite notes.db
-        let (notes, active_note_id) = match Database::open(db_path) {
+        let (mut notes, active_note_id) = match Database::open(db_path) {
             Ok(db) => match db.load_all_notes() {
                 Ok((loaded_notes, active_id)) => {
                     if loaded_notes.is_empty() {
@@ -152,6 +154,27 @@ impl AppData {
                 (def.notes, def.active_note_id)
             }
         };
+
+        // 3. Reconcile linked notes directly from disk if files were modified externally
+        for note in &mut notes {
+            if let Some(ref path_str) = note.file_path {
+                let path = Path::new(path_str);
+                if path.exists() && path.is_file() {
+                    if note.is_qn() {
+                        if let Ok(bytes) = fs::read(path)
+                            && bytes.starts_with(crate::models::QN_MAGIC)
+                            && let Ok(decoded) = Note::decode_qn_binary(&bytes)
+                        {
+                            note.content = decoded.content;
+                            note.attachments = decoded.attachments;
+                            note.updated_at = decoded.updated_at;
+                        }
+                    } else if let Ok(disk_content) = fs::read_to_string(path) {
+                        note.content = disk_content;
+                    }
+                }
+            }
+        }
 
         let mut data = Self {
             notes,
@@ -313,7 +336,8 @@ fn main() {
     }
 }
 
-/// Atomically writes arbitrary content to a target file via a temporary file + rename.
+/// Atomically writes arbitrary content to a target file via a temporary file + rename,
+/// falling back to direct write + sync if atomic rename fails (e.g. cross-filesystem boundary or permissions).
 pub fn atomic_write_file(path: &Path, data: &[u8]) -> Result<(), io::Error> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -331,17 +355,29 @@ pub fn atomic_write_file(path: &Path, data: &[u8]) -> Result<(), io::Error> {
         .map(|p| p.join(&temp_filename))
         .unwrap_or_else(|| PathBuf::from(&temp_filename));
 
-    let mut file = File::create(&temp_path)?;
-    file.write_all(data)?;
-    file.sync_all()?;
-    drop(file);
+    // 1. Try atomic write to temp file then rename
+    let atomic_result = (|| -> Result<(), io::Error> {
+        let mut file = File::create(&temp_path)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)?;
+        Ok(())
+    })();
 
-    if let Err(err) = fs::rename(&temp_path, path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(err);
+    match atomic_result {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            // Clean up temporary file if left behind
+            let _ = fs::remove_file(&temp_path);
+
+            // 2. Resilient direct write fallback
+            let mut file = File::create(path)?;
+            file.write_all(data)?;
+            file.sync_all()?;
+            Ok(())
+        }
     }
-
-    Ok(())
 }
 
 /// Atomically saves AppData to disk.

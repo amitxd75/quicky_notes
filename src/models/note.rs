@@ -142,6 +142,10 @@ pub struct Note {
     #[serde(default)]
     pub file_path: Option<String>,
 
+    /// Timestamp of the linked disk file when last read or written (to detect external changes without clobbering typing).
+    #[serde(skip)]
+    pub last_disk_mtime: Option<std::time::SystemTime>,
+
     /// Embedded image attachments bundled inside this note.
     #[serde(default)]
     pub attachments: Vec<NoteAttachment>,
@@ -172,6 +176,7 @@ impl Note {
             pinned: false,
             color_tag: None,
             file_path: None,
+            last_disk_mtime: None,
             attachments: Vec::new(),
         }
     }
@@ -489,6 +494,7 @@ impl Note {
             pinned: meta.pinned,
             color_tag: meta.color_tag,
             file_path: None,
+            last_disk_mtime: None,
             attachments,
         };
 

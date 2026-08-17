@@ -58,6 +58,45 @@ pub fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
+/// Sensitive system directory prefixes that are strictly blocked from file access.
+pub const BLOCKED_SYSTEM_PREFIXES: &[&str] = &[
+    "/etc/",
+    "/proc/",
+    "/sys/",
+    "/dev/",
+    "/boot/",
+    "/var/log/",
+    "/sbin/",
+    "/bin/",
+];
+
+/// Allowed system paths for runtime, user temp, and removable storage media.
+pub const ALLOWED_STORAGE_PREFIXES: &[&str] = &[
+    "/tmp/",
+    "/var/tmp/",
+    "/media/",
+    "/mnt/",
+    "/run/media/",
+    "/run/user/",
+];
+
+/// Sensitive user dotfiles and credential directories blocked from opening.
+pub const BLOCKED_DOT_ENTRIES: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".gpg",
+    ".config/quicky_notes",
+    ".bashrc",
+    ".bash_history",
+    ".zshrc",
+    ".zsh_history",
+    ".profile",
+    ".netrc",
+    ".aws",
+    ".kube",
+    ".docker",
+];
+
 /// Validates that a filesystem path is safe to open, read, or link.
 ///
 /// Resolves symlinks via `canonicalize()` and rejects:
@@ -67,36 +106,32 @@ pub fn url_decode(s: &str) -> String {
 pub fn is_safe_file_path(path: &Path) -> bool {
     let canonical = match std::fs::canonicalize(path) {
         Ok(p) => p,
-        Err(_) => return false,
+        Err(_) => {
+            if let Some(parent) = path.parent() {
+                if let Ok(canon_parent) = std::fs::canonicalize(parent) {
+                    canon_parent.join(path.file_name().unwrap_or_default())
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
     };
     let path_str = canonical.to_string_lossy();
 
     // Block sensitive system directories
-    const BLOCKED_PREFIXES: &[&str] = &[
-        "/etc/",
-        "/proc/",
-        "/sys/",
-        "/dev/",
-        "/boot/",
-        "/var/log/",
-        "/sbin/",
-        "/bin/",
-    ];
-    for prefix in BLOCKED_PREFIXES {
+    for prefix in BLOCKED_SYSTEM_PREFIXES {
         if path_str.starts_with(prefix) {
             return false;
         }
     }
 
     // Allow user temp, runtime, and removable media mounts
-    if path_str.starts_with("/tmp/")
-        || path_str.starts_with("/var/tmp/")
-        || path_str.starts_with("/media/")
-        || path_str.starts_with("/mnt/")
-        || path_str.starts_with("/run/media/")
-        || path_str.starts_with("/run/user/")
-    {
-        return true;
+    for allowed in ALLOWED_STORAGE_PREFIXES {
+        if path_str.starts_with(allowed) {
+            return true;
+        }
     }
 
     // Check home directory sensitive entries
@@ -104,21 +139,6 @@ pub fn is_safe_file_path(path: &Path) -> bool {
         let home = user_dirs.home_dir().to_string_lossy().to_string();
         if let Some(rel) = path_str.strip_prefix(&home) {
             let rel = rel.trim_start_matches('/');
-            const BLOCKED_DOT_ENTRIES: &[&str] = &[
-                ".ssh",
-                ".gnupg",
-                ".gpg",
-                ".config/quicky_notes",
-                ".bashrc",
-                ".bash_history",
-                ".zshrc",
-                ".zsh_history",
-                ".profile",
-                ".netrc",
-                ".aws",
-                ".kube",
-                ".docker",
-            ];
             for blocked in BLOCKED_DOT_ENTRIES {
                 if rel.starts_with(blocked) {
                     return false;
@@ -211,6 +231,90 @@ pub fn spawn_image_dialog() -> mpsc::Receiver<Option<String>> {
     rx
 }
 
+/// Opens a file or folder into the app, creating/focusing note tabs or launching a folder workspace.
+pub fn open_path_into_app(app: &mut QuickyNotesApp, path: &Path) {
+    if !is_safe_file_path(path) {
+        app.set_status("Blocked: path is outside allowed directories");
+        return;
+    }
+
+    // Canonicalize path to ensure exact matching across directories
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path_str = canonical.to_string_lossy().to_string();
+
+    // 1. Directory -> open folder workspace
+    if canonical.is_dir() {
+        app.open_folder_workspace(&canonical);
+        return;
+    }
+
+    if !canonical.exists() || !canonical.is_file() {
+        return;
+    }
+
+    let name = canonical
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "imported.qn".to_string());
+
+    // 2. Image attachment
+    if is_image_path(&canonical) {
+        if let Ok(bytes) = std::fs::read(&canonical) {
+            let mime = NoteAttachment::detect_mime(&name);
+            attach_image_to_active_note(app, &name, mime, bytes);
+        }
+        return;
+    }
+
+    // 3. Check if already open in a tab
+    if let Some(existing) = app
+        .data
+        .notes
+        .iter()
+        .find(|n| n.file_path.as_deref() == Some(&path_str))
+    {
+        app.data.active_note_id = Some(existing.id.clone());
+        app.focus_editor = true;
+        app.set_status(format!("Switched to {}", name));
+        return;
+    }
+
+    // 4. .qn binary container
+    if is_qn_path(&canonical)
+        && let Ok(bytes) = std::fs::read(&canonical)
+        && bytes.starts_with(QN_MAGIC)
+        && let Ok(mut note) = Note::decode_qn_binary(&bytes)
+    {
+        note.file_path = Some(path_str);
+        note.last_disk_mtime = std::fs::metadata(&canonical)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        let id = note.id.clone();
+        app.data.notes.push(note);
+        app.data.active_note_id = Some(id);
+        app.is_dirty = true;
+        app.focus_editor = true;
+        app.set_status(format!("Opened {}", name));
+        return;
+    }
+
+    // 5. Standard text / Markdown / code file
+    if let Ok(content) = std::fs::read_to_string(&canonical) {
+        let id = format!("note-{}", chrono::Local::now().timestamp_millis());
+        let mut note = Note::new(id.clone(), name.clone());
+        note.content = content;
+        note.file_path = Some(path_str);
+        note.last_disk_mtime = std::fs::metadata(&canonical)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        app.data.notes.push(note);
+        app.data.active_note_id = Some(id);
+        app.is_dirty = true;
+        app.focus_editor = true;
+        app.set_status(format!("Linked {}", name));
+    }
+}
+
 /// Polls a pending file dialog result and processes the selected file.
 ///
 /// Called from the main update loop to check if a background file dialog has completed.
@@ -229,64 +333,68 @@ pub fn poll_file_dialog(app: &mut QuickyNotesApp) {
 
     if let Some(Some(path_str)) = result {
         let path = std::path::Path::new(&path_str);
-        if !is_safe_file_path(path) {
-            app.set_status("Blocked: file path is outside allowed directories");
-            return;
-        }
-        if !path.exists() || !path.is_file() {
-            return;
-        }
+        open_path_into_app(app, path);
+    }
+}
 
-        let name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "imported.qn".to_string());
+/// Spawns a native directory selection dialog (Zenity/Kdialog) on a background thread.
+pub fn spawn_folder_dialog() -> mpsc::Receiver<Option<String>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let output = std::process::Command::new("zenity")
+            .arg("--file-selection")
+            .arg("--directory")
+            .output()
+            .or_else(|_| {
+                std::process::Command::new("kdialog")
+                    .arg("--getexistingdirectory")
+                    .output()
+            });
 
-        // 1. Check if it's an image attachment
-        if is_image_path(path) {
-            if let Ok(bytes) = std::fs::read(path) {
-                let mime = NoteAttachment::detect_mime(&name);
-                attach_image_to_active_note(app, &name, mime, bytes);
-            }
-            return;
-        }
-
-        // 2. Check if it's a .qn binary container
-        if is_qn_path(path)
-            && let Ok(bytes) = std::fs::read(path)
-            && bytes.starts_with(QN_MAGIC)
-            && let Ok(mut note) = Note::decode_qn_binary(&bytes)
-        {
-            note.file_path = Some(path_str);
-            let id = note.id.clone();
-            app.data.notes.push(note);
-            app.data.active_note_id = Some(id);
-            app.is_dirty = true;
-            app.focus_editor = true;
-            app.set_status(format!("Opened {}", name));
-            return;
-        }
-
-        // 3. Fallback: Standard text / Markdown file
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if let Some(existing) = app
-                .data
-                .notes
-                .iter()
-                .find(|n| n.file_path.as_deref() == Some(&path_str))
-            {
-                app.data.active_note_id = Some(existing.id.clone());
+        let result = if let Ok(out) = output {
+            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                Some(path_str)
             } else {
-                let id = format!("note-{}", chrono::Local::now().timestamp_millis());
-                let mut note = Note::new(id.clone(), name.clone());
-                note.content = content;
-                note.file_path = Some(path_str);
-                app.data.notes.push(note);
-                app.data.active_note_id = Some(id);
-                app.is_dirty = true;
+                None
             }
-            app.focus_editor = true;
-            app.set_status(format!("Linked {}", name));
+        } else {
+            None
+        };
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+/// Opens a native directory dialog to choose a folder workspace.
+pub fn open_folder_dialog(app: &mut QuickyNotesApp) {
+    if app.folder_dialog_rx.is_some() {
+        return;
+    }
+    app.folder_dialog_rx = Some(spawn_folder_dialog());
+    app.set_status("Opening folder dialog...");
+}
+
+/// Polls a pending folder selection dialog result.
+pub fn poll_folder_dialog(app: &mut QuickyNotesApp) {
+    let result = if let Some(rx) = &app.folder_dialog_rx {
+        match rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => Some(None),
+        }
+    } else {
+        return;
+    };
+
+    app.folder_dialog_rx = None;
+
+    if let Some(Some(path_str)) = result {
+        let path = std::path::Path::new(&path_str);
+        if is_safe_file_path(path) && path.is_dir() {
+            app.open_folder_workspace(path);
+        } else {
+            app.set_status("Folder path not allowed or not found");
         }
     }
 }
@@ -493,61 +601,13 @@ pub fn handle_dropped_files(app: &mut QuickyNotesApp, ctx: &egui::Context) {
     for file in dropped {
         // 1. Direct path available
         let path = file.path();
-        if !path.as_os_str().is_empty() && path.exists() && path.is_file() {
+        if !path.as_os_str().is_empty() && path.exists() {
             if !is_safe_file_path(path) {
                 blocked_count += 1;
                 continue;
             }
 
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "dropped.qn".to_string());
-
-            if is_image_path(path) {
-                if let Ok(bytes) = std::fs::read(path) {
-                    let mime = NoteAttachment::detect_mime(&name);
-                    attach_image_to_active_note(app, &name, mime, bytes);
-                }
-                continue;
-            }
-
-            if is_qn_path(path)
-                && let Ok(bytes) = std::fs::read(path)
-                && bytes.starts_with(QN_MAGIC)
-                && let Ok(mut note) = Note::decode_qn_binary(&bytes)
-            {
-                note.file_path = Some(path.to_string_lossy().to_string());
-                let id = note.id.clone();
-                app.data.notes.push(note);
-                app.data.active_note_id = Some(id);
-                app.is_dirty = true;
-                app.focus_editor = true;
-                app.set_status(format!("Opened {}", name));
-                continue;
-            }
-
-            if let Ok(content) = std::fs::read_to_string(path) {
-                let path_str = path.to_string_lossy().to_string();
-                if let Some(existing) = app
-                    .data
-                    .notes
-                    .iter()
-                    .find(|n| n.file_path.as_deref() == Some(&path_str))
-                {
-                    app.data.active_note_id = Some(existing.id.clone());
-                } else {
-                    let id = format!("note-{}", chrono::Local::now().timestamp_millis());
-                    let mut note = Note::new(id.clone(), name.clone());
-                    note.content = content;
-                    note.file_path = Some(path_str);
-                    app.data.notes.push(note);
-                    app.data.active_note_id = Some(id);
-                    app.is_dirty = true;
-                }
-                app.focus_editor = true;
-                app.set_status(format!("Opened {}", name));
-            }
+            open_path_into_app(app, path);
             continue;
         }
 

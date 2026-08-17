@@ -123,6 +123,7 @@ impl Database {
                 title,
                 content,
                 file_path,
+                last_disk_mtime: None,
                 created_at,
                 updated_at,
                 pinned: pinned_int != 0,

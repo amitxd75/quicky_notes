@@ -2,13 +2,23 @@
 
 use crate::app::QuickyNotesApp;
 use crate::components::{card, modal};
-use crate::theme::{self, ACCENT_EMERALD, ACCENT_PURPLE};
+use crate::theme::{self, ACCENT_EMERALD, ACCENT_PURPLE, Palette};
 use crate::ui;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, RichText, Stroke, Ui};
-use std::fmt::Write as _;
 
 /// Dedicated reserved height for the bottom status bar in pixels.
-pub const STATUS_BAR_HEIGHT: f32 = 32.0;
+pub const STATUS_BAR_HEIGHT: f32 = 26.0;
+
+/// Status bar compact viewport breakpoint width in pixels.
+pub const STATUS_BAR_COMPACT_BREAKPOINT: f32 = 600.0;
+/// Status bar ultra-compact viewport breakpoint width in pixels.
+pub const STATUS_BAR_ULTRA_COMPACT_BREAKPOINT: f32 = 450.0;
+/// Status bar wide statistics column width in pixels.
+pub const STATUS_BAR_WIDE_STATS_WIDTH: f32 = 260.0;
+/// Status bar compact statistics column width in pixels.
+pub const STATUS_BAR_COMPACT_STATS_WIDTH: f32 = 180.0;
+/// Status bar ultra-compact statistics column width in pixels.
+pub const STATUS_BAR_ULTRA_COMPACT_STATS_WIDTH: f32 = 130.0;
 
 /// Transient status notification message duration in seconds.
 pub const STATUS_MSG_DURATION_SECS: f32 = 3.5;
@@ -19,28 +29,11 @@ pub const GUTTER_CHUNK_SIZE: usize = 100;
 /// Minimum vertical height for multiline text editor canvas in pixels.
 pub const MIN_EDITOR_HEIGHT: f32 = 300.0;
 
-/// Renders line numbers gutter in small culling-friendly chunks to support arbitrarily large files without vertex limits.
-pub fn render_line_numbers_gutter(ui: &mut Ui, line_count: usize, line_font: &FontId) {
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let mut buffer = String::with_capacity(GUTTER_CHUNK_SIZE * 6);
-
-        for start in (1..=line_count).step_by(GUTTER_CHUNK_SIZE) {
-            let end = (start + GUTTER_CHUNK_SIZE - 1).min(line_count);
-            buffer.clear();
-            for line in start..=end {
-                let _ = writeln!(buffer, "{}", line);
-            }
-            if buffer.ends_with('\n') {
-                buffer.pop();
-            }
-            ui.label(
-                RichText::new(&buffer)
-                    .font(line_font.clone())
-                    .color(Color32::from_gray(100)),
-            );
-        }
-    });
+/// Computes line number gutter column width based on document line count and font size.
+#[inline]
+pub fn compute_gutter_width(line_count: usize, font_size: f32) -> f32 {
+    let digits = format!("{}", line_count.max(1)).len();
+    (digits as f32 * font_size * 0.62 + 14.0).max(24.0)
 }
 
 /// Renders the main glass editor container, header, drawers/editor, and status bar.
@@ -51,17 +44,20 @@ pub fn render_main_editor(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mu
             ui::header::render_header(app, ctx, ui);
             ui::draw_horizontal_divider(ui);
 
-            // 2. Exact calculation of body vs status bar heights
-            let status_bar_height = if !app.show_options && app.data.settings.show_status_bar {
+            // 2. Exact calculation of body vs status bar heights without overflow
+            let show_status_bar = !app.show_options && app.data.settings.show_status_bar;
+            let status_bar_height = if show_status_bar {
                 STATUS_BAR_HEIGHT
             } else {
                 0.0
             };
-            let body_height = (ui.available_height() - status_bar_height - 6.0).max(40.0);
+            let divider_height = if show_status_bar { 1.0 } else { 0.0 };
+            let body_height =
+                (ui.available_height() - status_bar_height - divider_height).max(40.0);
 
-            // 3. Body Area with explicit height allocation
+            // 3. Body Area with exact height allocation
             egui::Frame::NONE
-                .inner_margin(Margin::symmetric(14, 4))
+                .inner_margin(Margin::symmetric(14, 0))
                 .show(ui, |ui| {
                     ui.set_height(body_height);
                     ui.set_max_height(body_height);
@@ -76,7 +72,7 @@ pub fn render_main_editor(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mu
                 });
 
             // 4. Status Bar at the bottom
-            if !app.show_options && app.data.settings.show_status_bar {
+            if show_status_bar {
                 ui::draw_horizontal_divider(ui);
                 render_status_bar(app, ctx, ui);
             }
@@ -126,272 +122,334 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
     let line_count = app.cached_active_stats.2;
     let mut content_changed = false;
     let mut context_menu_action: Option<crate::ui::context_menu::ContextMenuAction> = None;
-    let current_cursor_range = app.last_cursor_range;
+
+    let active_path_opt = app.active_note().and_then(|n| n.file_path.clone());
+    let active_id_opt = app.data.active_note_id.clone();
+    let show_sidebar = app.show_folder_sidebar && app.folder_workspace.is_some();
+    let mut folder_action = None;
 
     let suggestion_engine = &mut app.suggestion_engine;
     let active_ghost_suffix = &mut app.active_ghost_suffix;
     let last_cursor_range = &mut app.last_cursor_range;
+    let folder_workspace = &mut app.folder_workspace;
+    let notes = &mut app.data.notes;
+    let split_ratio = &mut app.split_ratio;
 
-    if let Some(active_id) = app.data.active_note_id.as_deref()
-        && let Some(note) = app.data.notes.iter_mut().find(|n| n.id == active_id)
-    {
-        let line_font = if is_monospace {
-            FontId::monospace(font_size)
-        } else {
-            FontId::proportional(font_size)
-        };
+    let total_width = ui.available_width();
+    let full_height = ui.available_height();
 
-        let editor_height = ui.available_height();
-        let effective_mode = if note.is_markdown() {
-            preview_mode
-        } else {
-            crate::app::MarkdownViewMode::Edit
-        };
+    let sidebar_width = if show_sidebar {
+        folder_workspace
+            .as_ref()
+            .map_or(crate::ui::folder_tree::DEFAULT_SIDEBAR_WIDTH, |ws| {
+                ws.sidebar_width
+            })
+    } else {
+        0.0
+    };
+    let sep_width = if show_sidebar { 8.0 } else { 0.0 };
+    let editor_width = (total_width - sidebar_width - sep_width).max(100.0);
 
-        let language = if enable_syntax {
-            crate::ui::syntax::detect_language(&note.title, note.file_path.as_deref())
-        } else {
-            ""
-        };
-        let code_theme =
-            egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
+    ui.horizontal_top(|ui| {
+        if show_sidebar {
+            ui.allocate_ui_with_layout(
+                egui::vec2(sidebar_width, full_height),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    if let Some(ws) = folder_workspace {
+                        folder_action = crate::ui::folder_tree::render_folder_sidebar(
+                            ws,
+                            active_path_opt.as_deref(),
+                            &palette,
+                            ui,
+                            full_height,
+                        );
+                    }
+                },
+            );
 
-        match effective_mode {
-            crate::app::MarkdownViewMode::Edit => {
-                egui::ScrollArea::vertical()
-                    .id_salt("editor_scroll_area")
-                    .auto_shrink([false, false])
-                    .max_height(editor_height)
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.horizontal_top(|ui| {
-                                if show_line_numbers {
-                                    // Line numbers gutter (chunked for unlimited line counts)
-                                    render_line_numbers_gutter(ui, line_count, &line_font);
-                                    ui.add_space(6.0);
-                                    ui.separator();
-                                    ui.add_space(6.0);
-                                }
+            // Resizable separator between sidebar and editor
+            let (div_rect, div_resp) = ui.allocate_exact_size(
+                egui::vec2(sep_width, full_height),
+                egui::Sense::click_and_drag(),
+            );
+            if div_resp.hovered() || div_resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            if div_resp.dragged()
+                && let Some(ws) = folder_workspace
+            {
+                let delta_x = ui.input(|i| i.pointer.delta().x);
+                ws.sidebar_width = (ws.sidebar_width + delta_x).clamp(
+                    crate::ui::folder_tree::MIN_SIDEBAR_WIDTH,
+                    crate::ui::folder_tree::MAX_SIDEBAR_WIDTH,
+                );
+            }
+            let div_color = if div_resp.hovered() || div_resp.dragged() {
+                palette.accent
+            } else {
+                Palette::with_alpha(palette.border, 90)
+            };
+            let center_x = div_rect.center().x;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(center_x, div_rect.min.y),
+                    egui::pos2(center_x, div_rect.max.y),
+                ],
+                Stroke::new(1.0, div_color),
+            );
+        }
 
-                                render_multiline_editor_pane(
+        ui.allocate_ui_with_layout(
+            egui::vec2(editor_width, full_height),
+            egui::Layout::top_down(egui::Align::LEFT),
+            |ui| {
+                if let Some(ref active_id) = active_id_opt
+                    && let Some(note) = notes.iter_mut().find(|n| &n.id == active_id)
+                {
+                    let line_font = if is_monospace {
+                        FontId::monospace(font_size)
+                    } else {
+                        FontId::proportional(font_size)
+                    };
+
+                    let editor_height = full_height;
+                    let effective_mode = if note.is_markdown() {
+                        preview_mode
+                    } else {
+                        crate::app::MarkdownViewMode::Edit
+                    };
+
+                    let language = if enable_syntax {
+                        crate::ui::syntax::detect_language(&note.title, note.file_path.as_deref())
+                    } else {
+                        ""
+                    };
+                    let code_theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(
+                        ui.ctx(),
+                        ui.style(),
+                    );
+
+                    match effective_mode {
+                        crate::app::MarkdownViewMode::Edit => {
+                            egui::ScrollArea::vertical()
+                                .id_salt("editor_scroll_area")
+                                .auto_shrink([false, false])
+                                .max_height(editor_height)
+                                .min_scrolled_height(editor_height)
+                                .show(ui, |ui| {
+                                    render_multiline_editor_pane(
+                                        ui,
+                                        note,
+                                        show_line_numbers,
+                                        line_count,
+                                        enable_ghost_text,
+                                        active_ghost_suffix,
+                                        suggestion_engine,
+                                        last_cursor_range,
+                                        &palette,
+                                        &line_font,
+                                        &code_theme,
+                                        language,
+                                        is_monospace,
+                                        font_size,
+                                        "Type your notes here...",
+                                        should_focus,
+                                        &mut content_changed,
+                                        &mut context_menu_action,
+                                    );
+                                });
+                        }
+
+                        crate::app::MarkdownViewMode::Preview => {
+                            let preview_resp = egui::ScrollArea::vertical()
+                                .id_salt("preview_scroll_area")
+                                .auto_shrink([false, false])
+                                .max_height(editor_height)
+                                .min_scrolled_height(editor_height)
+                                .show(ui, |ui| {
+                                    ui.add_space(4.0);
+                                    if note.content.trim().is_empty() {
+                                        ui.vertical_centered(|ui| {
+                                            ui.add_space(40.0);
+                                            ui.label(
+                                                RichText::new("Markdown preview is empty.")
+                                                    .font(FontId::proportional(14.0))
+                                                    .color(Color32::from_gray(120)),
+                                            );
+                                        });
+                                    } else {
+                                        crate::ui::markdown::render_markdown(
+                                            ui,
+                                            &note.content,
+                                            font_size,
+                                            is_monospace,
+                                            &palette,
+                                            Some(note),
+                                        );
+                                    }
+                                });
+
+                            let r = ui.interact(
+                                preview_resp.inner_rect,
+                                egui::Id::new("preview_ctx_menu"),
+                                egui::Sense::click(),
+                            );
+
+                            r.context_menu(|ui| {
+                                crate::ui::context_menu::render_editor_context_menu(
                                     ui,
                                     note,
-                                    enable_ghost_text,
-                                    active_ghost_suffix,
-                                    suggestion_engine,
-                                    last_cursor_range,
-                                    current_cursor_range,
+                                    *last_cursor_range,
                                     &palette,
-                                    &line_font,
-                                    &code_theme,
-                                    language,
-                                    is_monospace,
-                                    font_size,
-                                    "Type your notes here...",
-                                    should_focus,
-                                    &mut content_changed,
                                     &mut context_menu_action,
                                 );
                             });
-                        });
-                    });
-            }
-
-            crate::app::MarkdownViewMode::Preview => {
-                let preview_resp = egui::ScrollArea::vertical()
-                    .id_salt("preview_scroll_area")
-                    .auto_shrink([false, false])
-                    .max_height(editor_height)
-                    .show(ui, |ui| {
-                        ui.add_space(4.0);
-                        if note.content.trim().is_empty() {
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(40.0);
-                                ui.label(
-                                    RichText::new("Markdown preview is empty.")
-                                        .font(FontId::proportional(14.0))
-                                        .color(Color32::from_gray(120)),
-                                );
-                            });
-                        } else {
-                            crate::ui::markdown::render_markdown(
-                                ui,
-                                &note.content,
-                                font_size,
-                                is_monospace,
-                                &palette,
-                                Some(note),
-                            );
                         }
-                    });
 
-                let r = ui.interact(
-                    preview_resp.inner_rect,
-                    egui::Id::new("preview_ctx_menu"),
-                    egui::Sense::click(),
-                );
+                        crate::app::MarkdownViewMode::Split => {
+                            let total_width = ui.available_width();
+                            let sep_width = 12.0;
+                            let usable_width = (total_width - sep_width).max(100.0);
+                            *split_ratio = split_ratio.clamp(0.15, 0.85);
 
-                r.context_menu(|ui| {
-                    crate::ui::context_menu::render_editor_context_menu(
-                        ui,
-                        note,
-                        *last_cursor_range,
-                        &palette,
-                        &mut context_menu_action,
-                    );
-                });
-            }
+                            let left_width = usable_width * *split_ratio;
+                            let right_width = (usable_width - left_width).max(50.0);
 
-            crate::app::MarkdownViewMode::Split => {
-                let total_width = ui.available_width();
-                let sep_width = 12.0;
-                let usable_width = (total_width - sep_width).max(100.0);
-                app.split_ratio = app.split_ratio.clamp(0.15, 0.85);
-
-                let left_width = usable_width * app.split_ratio;
-                let right_width = (usable_width - left_width).max(50.0);
-
-                ui.horizontal(|ui| {
-                    // Left column: Editor
-                    ui.vertical(|ui| {
-                        ui.set_width(left_width);
-                        ui.set_height(editor_height);
-                        egui::ScrollArea::vertical()
-                            .id_salt("split_editor_scroll_area")
-                            .auto_shrink([false, false])
-                            .max_height(editor_height)
-                            .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                // Left column: Editor
                                 ui.vertical(|ui| {
-                                    ui.horizontal_top(|ui| {
-                                        if app.data.settings.show_line_numbers {
-                                            render_line_numbers_gutter(ui, line_count, &line_font);
-                                            ui.add_space(6.0);
-                                            ui.separator();
-                                            ui.add_space(6.0);
-                                        }
-
-                                        render_multiline_editor_pane(
-                                            ui,
-                                            note,
-                                            enable_ghost_text,
-                                            active_ghost_suffix,
-                                            suggestion_engine,
-                                            last_cursor_range,
-                                            current_cursor_range,
-                                            &palette,
-                                            &line_font,
-                                            &code_theme,
-                                            language,
-                                            is_monospace,
-                                            font_size,
-                                            "Type markdown here...",
-                                            should_focus,
-                                            &mut content_changed,
-                                            &mut context_menu_action,
-                                        );
-                                    });
+                                    ui.set_width(left_width);
+                                    ui.set_height(editor_height);
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("split_editor_scroll_area")
+                                        .auto_shrink([false, false])
+                                        .max_height(editor_height)
+                                        .min_scrolled_height(editor_height)
+                                        .show(ui, |ui| {
+                                            ui.set_min_height(editor_height);
+                                            render_multiline_editor_pane(
+                                                ui,
+                                                note,
+                                                show_line_numbers,
+                                                line_count,
+                                                enable_ghost_text,
+                                                active_ghost_suffix,
+                                                suggestion_engine,
+                                                last_cursor_range,
+                                                &palette,
+                                                &line_font,
+                                                &code_theme,
+                                                language,
+                                                is_monospace,
+                                                font_size,
+                                                "Type notes here...",
+                                                should_focus,
+                                                &mut content_changed,
+                                                &mut context_menu_action,
+                                            );
+                                        });
                                 });
-                            });
-                    });
 
-                    // Middle draggable vertical divider & grip handle
-                    let (sep_rect, sep_resp) = ui.allocate_exact_size(
-                        egui::vec2(sep_width, editor_height),
-                        egui::Sense::click_and_drag(),
-                    );
+                                // Resizable Split Divider Handle
+                                let (div_rect, div_resp) = ui.allocate_exact_size(
+                                    egui::vec2(sep_width, editor_height),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                let is_hovered = div_resp.hovered();
+                                let is_dragged = div_resp.dragged();
 
-                    let is_active = sep_resp.hovered() || sep_resp.dragged();
+                                if is_dragged {
+                                    let delta_x = ui.input(|i| i.pointer.delta().x);
+                                    let new_left = (left_width + delta_x).max(60.0);
+                                    *split_ratio = (new_left / usable_width).clamp(0.15, 0.85);
+                                }
 
-                    if sep_resp.dragged() {
-                        let delta_x = sep_resp.drag_delta().x;
-                        let ratio_delta = delta_x / usable_width;
-                        app.split_ratio = (app.split_ratio + ratio_delta).clamp(0.15, 0.85);
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                    } else if sep_resp.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                    }
+                                let div_color = if is_dragged || is_hovered {
+                                    palette.accent
+                                } else {
+                                    Palette::with_alpha(palette.border, 90)
+                                };
 
-                    if sep_resp.double_clicked() {
-                        app.split_ratio = 0.5;
-                    }
+                                let center_x = div_rect.center().x;
+                                ui.painter().line_segment(
+                                    [
+                                        egui::pos2(center_x, div_rect.min.y),
+                                        egui::pos2(center_x, div_rect.max.y),
+                                    ],
+                                    Stroke::new(
+                                        if is_hovered || is_dragged { 2.0 } else { 1.0 },
+                                        div_color,
+                                    ),
+                                );
 
-                    // 1. Divider line from top to bottom
-                    let center_x = sep_rect.center().x;
-                    let line_color = if is_active {
-                        palette.accent
-                    } else {
-                        crate::theme::Palette::with_alpha(palette.border, 180)
-                    };
-                    let line_stroke =
-                        egui::Stroke::new(if is_active { 1.5 } else { 1.0 }, line_color);
-                    ui.painter().line_segment(
-                        [
-                            egui::pos2(center_x, sep_rect.min.y),
-                            egui::pos2(center_x, sep_rect.max.y),
-                        ],
-                        line_stroke,
-                    );
+                                // Right column: Live Markdown Preview
+                                let split_prev_resp = egui::ScrollArea::vertical()
+                                    .id_salt("split_preview_scroll_area")
+                                    .auto_shrink([false, false])
+                                    .max_height(editor_height)
+                                    .min_scrolled_height(editor_height)
+                                    .show(ui, |ui| {
+                                        ui.set_width(right_width);
+                                        ui.set_height(editor_height);
+                                        ui.set_min_height(editor_height);
+                                        ui.add_space(4.0);
+                                        if note.content.trim().is_empty() {
+                                            ui.vertical_centered(|ui| {
+                                                ui.add_space(40.0);
+                                                ui.label(
+                                                    RichText::new("Markdown preview is empty.")
+                                                        .font(FontId::proportional(14.0))
+                                                        .color(Color32::from_gray(120)),
+                                                );
+                                            });
+                                        } else {
+                                            crate::ui::markdown::render_markdown(
+                                                ui,
+                                                &note.content,
+                                                font_size,
+                                                is_monospace,
+                                                &palette,
+                                                Some(note),
+                                            );
+                                        }
+                                    });
 
-                    // 2. Centered draggable grip pill handle
-                    let pill_h = 36.0;
-                    let pill_w = if is_active { 5.0 } else { 3.5 };
-                    let pill_rect = egui::Rect::from_center_size(
-                        egui::pos2(center_x, sep_rect.center().y),
-                        egui::vec2(pill_w, pill_h),
-                    );
-                    let pill_bg = if is_active {
-                        palette.accent
-                    } else {
-                        Color32::from_gray(140)
-                    };
-
-                    ui.painter()
-                        .rect_filled(pill_rect, egui::CornerRadius::same(2), pill_bg);
-
-                    // Right column: Live Markdown Preview
-                    ui.vertical(|ui| {
-                        ui.set_width(right_width);
-                        ui.set_height(editor_height);
-                        let split_prev_resp = egui::ScrollArea::vertical()
-                            .id_salt("split_preview_scroll_area")
-                            .auto_shrink([false, false])
-                            .max_height(editor_height)
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.set_width(ui.available_width());
-                                    crate::ui::markdown::render_markdown(
+                                let r = ui.interact(
+                                    split_prev_resp.inner_rect,
+                                    egui::Id::new("split_preview_ctx_menu"),
+                                    egui::Sense::click(),
+                                );
+                                r.context_menu(|ui| {
+                                    crate::ui::context_menu::render_editor_context_menu(
                                         ui,
-                                        &note.content,
-                                        font_size,
-                                        is_monospace,
+                                        note,
+                                        *last_cursor_range,
                                         &palette,
-                                        Some(note),
+                                        &mut context_menu_action,
                                     );
                                 });
                             });
+                        }
+                    }
 
-                        let r = ui.interact(
-                            split_prev_resp.inner_rect,
-                            egui::Id::new("split_preview_ctx_menu"),
-                            egui::Sense::click(),
-                        );
-                        r.context_menu(|ui| {
-                            crate::ui::context_menu::render_editor_context_menu(
-                                ui,
-                                note,
-                                *last_cursor_range,
-                                &palette,
-                                &mut context_menu_action,
-                            );
-                        });
-                    });
-                });
+                    if content_changed {
+                        note.update_timestamp();
+                        app.is_dirty = true;
+                    }
+                }
+            },
+        );
+    });
+
+    if let Some(action) = folder_action {
+        match action {
+            crate::ui::folder_tree::FolderTreeAction::OpenFile(path) => {
+                app.open_file_from_path(&path);
             }
-        }
-
-        if content_changed {
-            note.update_timestamp();
-            app.is_dirty = true;
+            crate::ui::folder_tree::FolderTreeAction::CloseWorkspace => {
+                app.close_folder_workspace();
+            }
         }
     }
 
@@ -464,6 +522,12 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             crate::ui::context_menu::ContextMenuAction::AttachImage => {
                 crate::ui::drag_drop::open_image_dialog(app);
             }
+            crate::ui::context_menu::ContextMenuAction::OpenFile => {
+                crate::ui::drag_drop::open_file_dialog(app);
+            }
+            crate::ui::context_menu::ContextMenuAction::OpenFolder => {
+                crate::ui::drag_drop::open_folder_dialog(app);
+            }
             crate::ui::context_menu::ContextMenuAction::Delete => {
                 if let Some((start, end)) = cursor_range
                     && start < end
@@ -500,195 +564,353 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
     let palette = theme::get_palette(&app.data.settings);
     let mut attachment_changed = false;
 
+    let (active_file_path, is_markdown) = match app.active_note() {
+        Some(n) => (n.file_path.clone(), n.is_markdown()),
+        None => (None, false),
+    };
+
+    let total_w = ui.available_width();
+    let is_compact = total_w < STATUS_BAR_COMPACT_BREAKPOINT;
+    let is_ultra_compact = total_w < STATUS_BAR_ULTRA_COMPACT_BREAKPOINT;
+
+    let stats_w = if is_ultra_compact {
+        STATUS_BAR_ULTRA_COMPACT_STATS_WIDTH
+    } else if is_compact {
+        STATUS_BAR_COMPACT_STATS_WIDTH
+    } else {
+        STATUS_BAR_WIDE_STATS_WIDTH
+    };
+    let left_w = (total_w - stats_w - 12.0).max(60.0);
+
     egui::Frame::NONE
-        .inner_margin(Margin {
-            left: 14,
-            right: 14,
-            top: 5,
-            bottom: 9,
-        })
+        .inner_margin(Margin::symmetric(14, 3))
         .show(ui, |ui| {
+            ui.set_height(STATUS_BAR_HEIGHT - 6.0);
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+                // Left side: State dot, Monospace toggle, Truncated file path, Mode toggle, and Transient notifications
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_w, ui.available_height()),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
 
-                // 1. Sync State / Save status dot & label
-                if app.is_dirty {
-                    ui.label(
-                        RichText::new("●")
-                            .font(FontId::proportional(11.0))
-                            .color(Color32::from_rgb(251, 191, 36)),
-                    );
-                    ui.label(
-                        RichText::new("Unsaved")
-                            .font(FontId::proportional(11.5))
-                            .color(Color32::from_rgb(251, 191, 36)),
-                    );
-                } else {
-                    ui.label(
-                        RichText::new("●")
-                            .font(FontId::proportional(11.0))
-                            .color(ACCENT_EMERALD),
-                    );
-                    ui.label(
-                        RichText::new("Saved")
-                            .font(FontId::proportional(11.5))
-                            .color(Color32::from_gray(210)),
-                    );
-                }
-
-                // 1. Language / Monospace indicator
-                if app.data.settings.monospace_font {
-                    ui.label(
-                        RichText::new("Mono")
-                            .font(FontId::monospace(11.0))
-                            .color(Color32::from_gray(210)),
-                    );
-                    ui.label(
-                        RichText::new("•")
-                            .font(FontId::proportional(10.0))
-                            .color(Color32::from_gray(100)),
-                    );
-                }
-
-                // 2. Linked File indicator or Mode
-                if let Some(note) = app.active_note() {
-                    if let Some(ref path_str) = note.file_path {
-                        let is_status_active = app.status_msg.as_ref().is_some_and(|(_, created)| {
-                            created.elapsed().as_secs_f32() < STATUS_MSG_DURATION_SECS
-                        });
-                        let max_path_len = if is_status_active { 20 } else { 34 };
-                        let display_path =
-                            crate::storage::format_display_path(path_str, max_path_len);
-                        let path_resp = ui.add(
-                            egui::Label::new(
-                                RichText::new(format!("🔗 {}", display_path))
-                                    .font(FontId::proportional(11.5))
-                                    .color(palette.accent),
+                        // 1. Interactive Sync / Save status indicator (Click to save)
+                        let (dot_color, label_text, label_color) = if app.is_dirty {
+                            (
+                                Color32::from_rgb(251, 191, 36),
+                                "Unsaved",
+                                Color32::from_rgb(251, 191, 36),
                             )
-                            .sense(egui::Sense::click())
-                            .truncate(),
-                        );
+                        } else {
+                            (ACCENT_EMERALD, "Saved", Color32::from_gray(210))
+                        };
 
-                        let tooltip = format!(
-                            "📁 Directly linked file on disk:\n{}\n\n• Click to copy full path\n• Right-click to reveal in file manager",
-                            path_str
-                        );
-                        let path_resp = path_resp.on_hover_text(tooltip);
+                        let save_resp = ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.label(RichText::new("●").font(FontId::proportional(11.0)).color(dot_color));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(label_text)
+                                        .font(FontId::proportional(11.5))
+                                        .color(label_color),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                        })
+                        .inner;
 
-                        if path_resp.clicked() {
-                            ui.ctx().copy_text(path_str.clone());
+                        let save_tooltip = if app.is_dirty {
+                            "● Unsaved changes in note\n• Click to save immediately to disk (Ctrl+S)"
+                        } else {
+                            "● All notes saved to disk ✓\n• Click to force save (Ctrl+S)"
+                        };
+                        if save_resp.on_hover_text(save_tooltip).clicked() {
+                            app.save_notes_to_disk();
                         }
 
-                        path_resp.context_menu(|ui| {
-                            if ui.button("📋 Copy Full Path").clicked() {
-                                ui.ctx().copy_text(path_str.clone());
-                                ui.close();
-                            }
-                            if ui.button("📂 Reveal Folder in File Manager").clicked() {
-                                if let Some(parent) = std::path::Path::new(path_str).parent() {
-                                    crate::ui::drag_drop::safe_open_folder(parent);
-                                }
-                                ui.close();
-                            }
-                        });
-                    } else if note.is_markdown() {
-                        ui.label(
-                            RichText::new("Markdown")
-                                .font(FontId::proportional(11.5))
-                                .color(Color32::from_gray(190)),
-                        );
-                    } else {
-                        ui.label(
-                            RichText::new("Plain Text")
-                                .font(FontId::proportional(11.5))
-                                .color(Color32::from_gray(190)),
-                        );
-                    }
-                }
-
-                // 3. Attached Images minimal indicator
-                if let Some(note) = app.active_note_mut()
-                    && !note.attachments.is_empty()
-                {
-                    ui.label(
-                        RichText::new("•")
-                            .font(FontId::proportional(10.0))
-                            .color(Color32::from_gray(100)),
-                    );
-                    crate::ui::image_view::render_attachment_popup_button(
-                        ui,
-                        ctx,
-                        note,
-                        &palette,
-                        &mut attachment_changed,
-                    );
-                }
-
-                // 4. Transient Status Message Notification with Smooth Fade Animation
-                if let Some((msg, created)) = &app.status_msg {
-                    let elapsed = created.elapsed().as_secs_f32();
-                    if elapsed < STATUS_MSG_DURATION_SECS {
-                        let fade = if elapsed < 0.2 {
-                            (elapsed / 0.2).clamp(0.0, 1.0)
-                        } else if elapsed > STATUS_MSG_DURATION_SECS - 0.7 {
-                            ((STATUS_MSG_DURATION_SECS - elapsed) / 0.7).clamp(0.0, 1.0)
+                        // 2. Interactive Language / Monospace indicator (Click to toggle font)
+                        let font_label = if app.data.settings.monospace_font {
+                            "Mono"
                         } else {
-                            1.0
+                            "Sans"
                         };
-                        let alpha = (255.0 * fade) as u8;
-                        if alpha > 10 {
+                        let font_resp = ui.add(
+                            egui::Label::new(
+                                RichText::new(font_label)
+                                    .font(if app.data.settings.monospace_font {
+                                        FontId::monospace(11.0)
+                                    } else {
+                                        FontId::proportional(11.5)
+                                    })
+                                    .color(Color32::from_gray(210)),
+                            )
+                            .sense(egui::Sense::click()),
+                        );
+                        let font_tooltip = format!(
+                            "Font Family: {}\n• Click to toggle between Monospace and Proportional font",
+                            if app.data.settings.monospace_font {
+                                "Monospace"
+                            } else {
+                                "Proportional"
+                            }
+                        );
+                        if font_resp.on_hover_text(font_tooltip).clicked() {
+                            app.data.settings.monospace_font = !app.data.settings.monospace_font;
+                            app.is_dirty = true;
+                            app.set_status(format!(
+                                "Font: {}",
+                                if app.data.settings.monospace_font {
+                                    "Monospace"
+                                } else {
+                                    "Proportional"
+                                }
+                            ));
+                        }
+
+                        ui.label(
+                            RichText::new("•")
+                                .font(FontId::proportional(10.0))
+                                .color(Color32::from_gray(100)),
+                        );
+
+                        // 3. Linked File indicator or Interactive Mode toggle
+                        if let Some(ref path_str) = active_file_path {
+                            let is_status_active =
+                                app.status_msg.as_ref().is_some_and(|(_, created)| {
+                                    created.elapsed().as_secs_f32() < STATUS_MSG_DURATION_SECS
+                                });
+                            let max_path_len = if is_status_active {
+                                14
+                            } else if is_compact {
+                                18
+                            } else {
+                                32
+                            };
+                            let display_path =
+                                crate::storage::format_display_path(path_str, max_path_len);
+                            let path_resp = ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("🔗 {}", display_path))
+                                        .font(FontId::proportional(11.5))
+                                        .color(palette.accent),
+                                )
+                                .sense(egui::Sense::click())
+                                .truncate(),
+                            );
+
+                            let tooltip = format!(
+                                "📁 Directly linked file on disk:\n{}\n\n• Click to copy full path\n• Right-click to reveal in file manager",
+                                path_str
+                            );
+                            let path_resp = path_resp.on_hover_text(tooltip);
+
+                            if path_resp.clicked() {
+                                ui.ctx().copy_text(path_str.clone());
+                                app.show_toast(
+                                    "File path copied to clipboard",
+                                    crate::ui::toast::ToastKind::Success,
+                                );
+                            }
+
+                            path_resp.context_menu(|ui| {
+                                if ui.button("📋 Copy Full Path").clicked() {
+                                    ui.ctx().copy_text(path_str.clone());
+                                    ui.close();
+                                }
+                                if ui.button("📂 Reveal Folder in File Manager").clicked() {
+                                    if let Some(parent) =
+                                        std::path::Path::new(path_str).parent()
+                                    {
+                                        crate::ui::drag_drop::safe_open_folder(parent);
+                                    }
+                                    ui.close();
+                                }
+                            });
+                        } else {
+                            let mode_label = if is_markdown {
+                                "Markdown"
+                            } else {
+                                "Plain Text"
+                            };
+                            let mode_resp = ui.add(
+                                egui::Label::new(
+                                    RichText::new(mode_label)
+                                        .font(FontId::proportional(11.5))
+                                        .color(Color32::from_gray(190)),
+                                )
+                                .sense(egui::Sense::click()),
+                            );
+
+                            if is_markdown {
+                                let mode_tooltip = format!(
+                                    "Document Type: Markdown ({})\n• Click to cycle preview mode (Edit / Split / View)",
+                                    app.preview_mode.label()
+                                );
+                                if mode_resp.on_hover_text(mode_tooltip).clicked() {
+                                    app.preview_mode = app.preview_mode.next();
+                                }
+                            } else {
+                                mode_resp.on_hover_text("Document Type: Plain Text Note");
+                            }
+                        }
+
+                        // 4. Attached Images minimal indicator
+                        if let Some(note) = app.active_note_mut()
+                            && !note.attachments.is_empty()
+                        {
                             ui.label(
                                 RichText::new("•")
                                     .font(FontId::proportional(10.0))
-                                    .color(Color32::from_rgba_unmultiplied(100, 100, 100, alpha)),
+                                    .color(Color32::from_gray(100)),
                             );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(format!("⚡ {}", msg))
-                                        .font(FontId::proportional(11.5))
-                                        .color(Color32::from_rgba_unmultiplied(
-                                            palette.accent.r(),
-                                            palette.accent.g(),
-                                            palette.accent.b(),
-                                            alpha,
-                                        )),
-                                )
-                                .truncate(),
+                            crate::ui::image_view::render_attachment_popup_button(
+                                ui,
+                                ctx,
+                                note,
+                                &palette,
+                                &mut attachment_changed,
                             );
                         }
-                    }
-                }
 
+                        // 5. Transient Status Message Notification
+                        if let Some((msg, created)) = &app.status_msg {
+                            let elapsed = created.elapsed().as_secs_f32();
+                            if elapsed < STATUS_MSG_DURATION_SECS {
+                                let fade = if elapsed < 0.2 {
+                                    (elapsed / 0.2).clamp(0.0, 1.0)
+                                } else if elapsed > STATUS_MSG_DURATION_SECS - 0.7 {
+                                    ((STATUS_MSG_DURATION_SECS - elapsed) / 0.7).clamp(0.0, 1.0)
+                                } else {
+                                    1.0
+                                };
+                                let alpha = (255.0 * fade) as u8;
+                                if alpha > 10 {
+                                    ui.label(
+                                        RichText::new("•")
+                                            .font(FontId::proportional(10.0))
+                                            .color(Color32::from_rgba_unmultiplied(
+                                                100, 100, 100, alpha,
+                                            )),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(format!("⚡ {}", msg))
+                                                .font(FontId::proportional(11.5))
+                                                .color(Color32::from_rgba_unmultiplied(
+                                                    palette.accent.r(),
+                                                    palette.accent.g(),
+                                                    palette.accent.b(),
+                                                    alpha,
+                                                )),
+                                        )
+                                        .truncate(),
+                                    );
+                                }
+                            }
+                        }
+                    },
+                );
 
-                // --- Right Side Stats ---
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
+                // Right side: Statistics & Encoding (Responsive and Interactive)
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), ui.available_height()),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
 
-                    // UTF-8
-                    ui.label(
-                        RichText::new("UTF-8")
-                            .font(FontId::monospace(11.0))
-                            .color(Color32::from_gray(150)),
-                    );
+                        // 1. UTF-8 Indicator
+                        if !is_ultra_compact {
+                            let utf8_resp = ui.add(
+                                egui::Label::new(
+                                    RichText::new("UTF-8")
+                                        .font(FontId::monospace(11.0))
+                                        .color(Color32::from_gray(150)),
+                                )
+                                .sense(egui::Sense::hover()),
+                            );
+                            utf8_resp.on_hover_text("Text Encoding: UTF-8 Unicode");
+                        }
 
-                    // Tab size
-                    ui.label(
-                        RichText::new(format!("Tab: {} sp", app.data.settings.tab_size))
-                            .font(FontId::proportional(11.5))
-                            .color(Color32::from_gray(170)),
-                    );
+                        // 2. Interactive Tab Size (Click or Context menu to cycle/change)
+                        if !is_compact {
+                            let tab_resp = ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("Tab: {} sp", app.data.settings.tab_size))
+                                        .font(FontId::proportional(11.5))
+                                        .color(Color32::from_gray(170)),
+                                )
+                                .sense(egui::Sense::click()),
+                            );
+                            let tab_tooltip = format!(
+                                "Tab Indentation: {} spaces\n• Click to cycle tab size (2, 4, 8)\n• Right-click for options",
+                                app.data.settings.tab_size
+                            );
+                            let tab_resp = tab_resp.on_hover_text(tab_tooltip);
 
-                    // Word / Char statistics
-                    let (words, chars, lines) = app.cached_active_stats;
-                    ui.label(
-                        RichText::new(format!(
-                            "Lines: {}  •  Words: {}  •  Chars: {}",
+                            if tab_resp.clicked() {
+                                let new_size = match app.data.settings.tab_size {
+                                    2 => 4,
+                                    4 => 8,
+                                    _ => 2,
+                                };
+                                app.data.settings.tab_size = new_size;
+                                app.is_dirty = true;
+                                app.set_status(format!("Tab size: {} spaces", new_size));
+                            }
+
+                            tab_resp.context_menu(|ui| {
+                                for sz in [2, 4, 8] {
+                                    if ui
+                                        .selectable_label(
+                                            app.data.settings.tab_size == sz,
+                                            format!("{} Spaces", sz),
+                                        )
+                                        .clicked()
+                                    {
+                                        app.data.settings.tab_size = sz;
+                                        app.is_dirty = true;
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+
+                        // 3. Document Statistics (Responsive formatting + Click to copy)
+                        let (words, chars, lines) = app.cached_active_stats;
+                        let stats_text = if is_ultra_compact {
+                            format!("L: {} • W: {}", lines, words)
+                        } else if is_compact {
+                            format!("L: {} • W: {} • C: {}", lines, words, chars)
+                        } else {
+                            format!("Lines: {} • Words: {} • Chars: {}", lines, words, chars)
+                        };
+
+                        let stats_resp = ui.add(
+                            egui::Label::new(
+                                RichText::new(stats_text)
+                                    .font(FontId::proportional(11.5))
+                                    .color(Color32::from_gray(190)),
+                            )
+                            .sense(egui::Sense::click()),
+                        );
+
+                        let stats_tooltip = format!(
+                            "📊 Document Metrics:\n• Lines: {}\n• Words: {}\n• Characters: {}\n• Click to copy statistics to clipboard",
                             lines, words, chars
-                        ))
-                        .font(FontId::proportional(11.5))
-                        .color(Color32::from_gray(190)),
-                    );
-                });
+                        );
+                        if stats_resp.on_hover_text(stats_tooltip).clicked() {
+                            let summary = format!(
+                                "Lines: {}, Words: {}, Characters: {}",
+                                lines, words, chars
+                            );
+                            ui.ctx().copy_text(summary);
+                            app.show_toast(
+                                "Stats copied to clipboard",
+                                crate::ui::toast::ToastKind::Success,
+                            );
+                        }
+                    },
+                );
             });
         });
 
@@ -847,11 +1069,12 @@ pub use crate::ui::toast::render_floating_toast;
 fn render_multiline_editor_pane(
     ui: &mut Ui,
     note: &mut crate::note::Note,
+    show_line_numbers: bool,
+    line_count: usize,
     enable_ghost_text: bool,
     active_ghost_suffix: &mut Option<String>,
     suggestion_engine: &mut crate::suggest::SuggestionEngine,
     last_cursor_range: &mut Option<(usize, usize)>,
-    current_cursor_range: Option<(usize, usize)>,
     palette: &theme::Palette,
     line_font: &FontId,
     code_theme: &egui_extras::syntax_highlighting::CodeTheme,
@@ -910,16 +1133,83 @@ fn render_multiline_editor_pane(
     }
 
     let min_editor_h = (ui.available_height() - 10.0).max(300.0);
-    let text_edit = egui::TextEdit::multiline(&mut note.content)
-        .frame(egui::Frame::NONE)
-        .hint_text(hint_text)
-        .desired_width(ui.available_width())
-        .min_size(egui::vec2(ui.available_width(), min_editor_h))
-        .lock_focus(true)
-        .layouter(&mut layouter);
+    let gutter_width = if show_line_numbers {
+        compute_gutter_width(line_count, font_size)
+    } else {
+        0.0
+    };
 
-    let output = text_edit.show(ui);
+    let (gutter_rect, output) = ui
+        .horizontal_top(|ui| {
+            let g_rect = if show_line_numbers {
+                let (r, _) = ui.allocate_exact_size(
+                    egui::vec2(gutter_width, min_editor_h),
+                    egui::Sense::hover(),
+                );
+                ui.add_space(8.0);
+                Some(r)
+            } else {
+                None
+            };
+
+            let text_edit = egui::TextEdit::multiline(&mut note.content)
+                .frame(egui::Frame::NONE)
+                .hint_text(hint_text)
+                .desired_width(ui.available_width())
+                .min_size(egui::vec2(ui.available_width(), min_editor_h))
+                .lock_focus(true)
+                .layouter(&mut layouter);
+
+            let out = text_edit.show(ui);
+            (g_rect, out)
+        })
+        .inner;
+
     let resp = &output.response;
+
+    // Paint line numbers directly aligned with TextEdit visual rows (culling-aware, handles word wrapping flawlessly)
+    if let Some(gutter_r) = gutter_rect {
+        let divider_x = gutter_r.max.x + 4.0;
+        let editor_top = output.response.rect.min.y;
+        let editor_bottom = output.response.rect.max.y;
+
+        ui.painter().line_segment(
+            [
+                egui::pos2(divider_x, editor_top),
+                egui::pos2(divider_x, editor_bottom),
+            ],
+            Stroke::new(1.0, Palette::with_alpha(palette.border, 60)),
+        );
+
+        let mut logical_line = 1;
+        let mut next_row_is_new_line = true;
+
+        if output.galley.rows.is_empty() {
+            ui.painter().text(
+                egui::pos2(gutter_r.max.x - 2.0, editor_top + font_size * 0.7),
+                egui::Align2::RIGHT_CENTER,
+                "1",
+                line_font.clone(),
+                Palette::with_alpha(palette.muted_text, 140),
+            );
+        } else {
+            for row in &output.galley.rows {
+                let row_center_y = editor_top + row.rect().center().y;
+                if next_row_is_new_line {
+                    let line_str = format!("{}", logical_line);
+                    ui.painter().text(
+                        egui::pos2(gutter_r.max.x - 2.0, row_center_y),
+                        egui::Align2::RIGHT_CENTER,
+                        line_str,
+                        line_font.clone(),
+                        Palette::with_alpha(palette.muted_text, 140),
+                    );
+                    logical_line += 1;
+                }
+                next_row_is_new_line = row.ends_with_newline;
+            }
+        }
+    }
 
     let accepted = handle_ghost_text(
         enable_ghost_text,
@@ -935,32 +1225,10 @@ fn render_multiline_editor_pane(
         content_changed,
     );
 
-    let is_lmb_clicked = resp.clicked();
-
     if !accepted && let Some(range) = output.state.cursor.char_range() {
         let p: usize = range.primary.index.into();
         let s: usize = range.secondary.index.into();
-        if p != s {
-            // Active non-empty text selection: always record it
-            *last_cursor_range = Some((p.min(s), p.max(s)));
-        } else if is_lmb_clicked || last_cursor_range.is_none() {
-            // User explicitly left-clicked at a point, clearing the selection
-            *last_cursor_range = Some((p, p));
-        } else if let Some((start, end)) = current_cursor_range
-            && start < end
-        {
-            // Preserve existing selection when right-clicking or opening context menu
-            *last_cursor_range = Some((start, end));
-            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
-                .unwrap_or_else(|| output.state.clone());
-            state
-                .cursor
-                .set_char_range(Some(egui::text_selection::CCursorRange::two(
-                    egui::text::CCursor::new(start),
-                    egui::text::CCursor::new(end),
-                )));
-            state.store(ui.ctx(), resp.id);
-        }
+        *last_cursor_range = Some((p.min(s), p.max(s)));
     }
 
     resp.context_menu(|ui| {

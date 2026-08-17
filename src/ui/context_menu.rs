@@ -20,6 +20,10 @@ pub enum ContextMenuAction {
     Paste,
     /// Opens file dialog to attach an image.
     AttachImage,
+    /// Opens file picker to open a file.
+    OpenFile,
+    /// Opens folder picker to open a folder workspace.
+    OpenFolder,
     /// Deletes selected text.
     Delete,
 
@@ -93,7 +97,20 @@ pub fn render_editor_context_menu(
 
         menu_separator(ui, palette);
 
-        // ─── 3. Selection & Search Operations ───
+        // ─── 3. File & Folder Operations ───
+        if menu_item(ui, "📥 Open File...", "Ctrl+O", palette, true).clicked() {
+            *action_out = Some(ContextMenuAction::OpenFile);
+            ui.close();
+        }
+
+        if menu_item(ui, "📁 Open Folder...", "Ctrl+Shift+O", palette, true).clicked() {
+            *action_out = Some(ContextMenuAction::OpenFolder);
+            ui.close();
+        }
+
+        menu_separator(ui, palette);
+
+        // ─── 4. Selection & Search Operations ───
         if menu_item(
             ui,
             "🔲 Select All",

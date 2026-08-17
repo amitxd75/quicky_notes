@@ -18,6 +18,8 @@ pub enum ShortcutAction {
     CloseNote,
     SaveNotes,
     OpenFile,
+    OpenFolder,
+    ToggleFolderSidebar,
     AttachImage,
     ToggleMarkdown,
     SearchNotes,
@@ -48,6 +50,8 @@ impl ShortcutAction {
         Self::CloseNote,
         Self::SaveNotes,
         Self::OpenFile,
+        Self::OpenFolder,
+        Self::ToggleFolderSidebar,
         Self::AttachImage,
         Self::ToggleMarkdown,
         Self::AiAssist,
@@ -78,6 +82,8 @@ impl ShortcutAction {
             Self::CloseNote => "Close Active Tab",
             Self::SaveNotes => "Save Notes to Disk",
             Self::OpenFile => "Open / Import File from Disk",
+            Self::OpenFolder => "Open Folder Workspace",
+            Self::ToggleFolderSidebar => "Toggle Folder Sidebar",
             Self::AttachImage => "Attach Image from Disk",
             Self::ToggleMarkdown => "Toggle Markdown Preview",
             Self::AiAssist => "AI Copilot & Fixer",
@@ -123,9 +129,11 @@ impl ShortcutAction {
             | Self::SaveNotes
             | Self::ExportNote
             | Self::OpenFile
+            | Self::OpenFolder
             | Self::AttachImage => "Note Operations",
 
             Self::ToggleMarkdown
+            | Self::ToggleFolderSidebar
             | Self::AiAssist
             | Self::IncreaseFontSize
             | Self::DecreaseFontSize => "Editor & View",
@@ -141,6 +149,8 @@ impl ShortcutAction {
             Self::CloseNote => KeyBinding::ctrl("W"),
             Self::SaveNotes => KeyBinding::ctrl("S"),
             Self::OpenFile => KeyBinding::ctrl("O"),
+            Self::OpenFolder => KeyBinding::ctrl_shift("O"),
+            Self::ToggleFolderSidebar => KeyBinding::ctrl("B"),
             Self::AttachImage => KeyBinding::ctrl_shift("I"),
             Self::ToggleMarkdown => KeyBinding::ctrl("P"),
             Self::AiAssist => KeyBinding::ctrl("Enter"),
@@ -705,6 +715,9 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     let trigger_close_note = ctx.input(|i| kb.get(ShortcutAction::CloseNote).matches_input(i));
     let trigger_save = ctx.input(|i| kb.get(ShortcutAction::SaveNotes).matches_input(i));
     let trigger_open_file = ctx.input(|i| kb.get(ShortcutAction::OpenFile).matches_input(i));
+    let trigger_open_folder = ctx.input(|i| kb.get(ShortcutAction::OpenFolder).matches_input(i));
+    let trigger_toggle_folder_sidebar =
+        ctx.input(|i| kb.get(ShortcutAction::ToggleFolderSidebar).matches_input(i));
     let trigger_attach_image = ctx.input(|i| kb.get(ShortcutAction::AttachImage).matches_input(i));
     let trigger_markdown = ctx.input(|i| kb.get(ShortcutAction::ToggleMarkdown).matches_input(i));
 
@@ -783,6 +796,22 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         app.show_options = false;
         app.show_search = false;
         ui::drag_drop::open_file_dialog(app);
+    }
+
+    if trigger_open_folder {
+        app.show_options = false;
+        app.show_search = false;
+        ui::drag_drop::open_folder_dialog(app);
+    }
+
+    if trigger_toggle_folder_sidebar {
+        if app.folder_workspace.is_none() {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            app.open_folder_workspace(&cwd);
+        } else {
+            app.show_folder_sidebar = !app.show_folder_sidebar;
+        }
+        ctx.request_repaint();
     }
 
     if trigger_attach_image {

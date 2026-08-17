@@ -112,6 +112,18 @@ pub struct QuickyNotesApp {
 
     /// Last timestamp for window size persistence check.
     pub last_window_size_check: Instant,
+
+    /// Active collapsible folder explorer workspace.
+    pub folder_workspace: Option<crate::ui::folder_tree::FolderWorkspace>,
+
+    /// Whether the folder tree sidebar is currently visible.
+    pub show_folder_sidebar: bool,
+
+    /// Receiver for async directory selection dialogs.
+    pub folder_dialog_rx: Option<mpsc::Receiver<Option<String>>>,
+
+    /// Last timestamp for real-time external disk change polling.
+    pub last_disk_sync: Instant,
 }
 
 impl QuickyNotesApp {
@@ -169,7 +181,61 @@ impl QuickyNotesApp {
             last_cursor_range: None,
             split_ratio: 0.5,
             last_window_size_check: Instant::now(),
+            folder_workspace: None,
+            show_folder_sidebar: false,
+            folder_dialog_rx: None,
+            last_disk_sync: Instant::now(),
         }
+    }
+
+    /// Initializes QuickyNotesApp with AppData and executes parsed CLI options.
+    pub fn new_with_data_and_cli(
+        cc: &eframe::CreationContext<'_>,
+        data: AppData,
+        cli: crate::platform::CliArgs,
+    ) -> Self {
+        let mut app = Self::new_with_data(cc, data);
+
+        if let Some(folder_path) = cli.folder {
+            app.open_folder_workspace(&folder_path);
+        }
+
+        for file_path in cli.files {
+            app.open_file_from_path(&file_path);
+        }
+
+        if cli.new_tab {
+            app.create_new_note();
+        }
+
+        app
+    }
+
+    /// Opens a folder workspace for browsing files and projects in a collapsible sidebar.
+    pub fn open_folder_workspace(&mut self, path: &std::path::Path) {
+        if let Some(workspace) = crate::ui::folder_tree::FolderWorkspace::open(path) {
+            let name = workspace.root_name.clone();
+            self.folder_workspace = Some(workspace);
+            self.show_folder_sidebar = true;
+            self.show_options = false;
+            self.show_search = false;
+            self.show_toast(format!("Opened folder: {}", name), ToastKind::Success);
+            self.set_status(format!("Folder: {}", name));
+        } else {
+            self.show_toast("Failed to open folder workspace", ToastKind::Error);
+        }
+    }
+
+    /// Closes the active folder workspace sidebar.
+    pub fn close_folder_workspace(&mut self) {
+        self.folder_workspace = None;
+        self.show_folder_sidebar = false;
+        self.set_status("Folder workspace closed");
+    }
+
+    /// Opens or selects a note tab for the specified file path.
+    pub fn open_file_from_path(&mut self, path: &std::path::Path) {
+        crate::ui::drag_drop::open_path_into_app(self, path);
     }
 
     /// Launches the AI Copilot modal using the currently selected text or surrounding cursor context.
@@ -236,10 +302,14 @@ impl QuickyNotesApp {
         self.set_status("New tab created");
     }
 
-    /// Prompts close confirmation modal if note has content, or closes immediately if empty or disabled.
+    /// Prompts close confirmation modal if note has unsaved changes, or closes immediately for linked files / empty notes.
     pub fn prompt_close_note(&mut self, id: &str) {
         if let Some(note) = self.data.notes.iter().find(|n| n.id == id) {
-            if !self.data.settings.confirm_close_tab || note.content.trim().is_empty() {
+            // Linked disk files or notes without unsaved custom content close immediately without modal darkening
+            if note.file_path.is_some()
+                || !self.data.settings.confirm_close_tab
+                || note.content.trim().is_empty()
+            {
                 self.close_note(id);
             } else {
                 self.confirm_close_id = Some(id.to_string());
@@ -254,6 +324,7 @@ impl QuickyNotesApp {
                 let ext = &self.data.settings.default_extension;
                 note.title = format!("untitled{}", ext);
                 note.content.clear();
+                note.file_path = None;
                 note.update_timestamp();
             }
             self.set_status("Tab cleared");
@@ -280,63 +351,59 @@ impl QuickyNotesApp {
     ///
     /// Unlike auto-save, this always triggers a save regardless of the dirty flag.
     pub fn save_notes_to_disk(&mut self) {
-        self.save_if_dirty_inner(true);
+        self.save_if_dirty_internal(true);
         self.show_toast("Saved to disk ✓", ToastKind::Success);
     }
 
     /// Saves notes and settings if dirty flag is set.
     /// If notes are linked to external files on disk, they are saved directly to their respective file paths.
     pub fn save_if_dirty(&mut self) {
-        self.save_if_dirty_inner(false);
+        self.save_if_dirty_internal(false);
     }
 
-    /// Internal save implementation. When `force` is true, saves even if not dirty (for explicit Ctrl+S).
-    fn save_if_dirty_inner(&mut self, force: bool) {
+    /// Internal core persistence logic called by both debounced autosave and manual save.
+    fn save_if_dirty_internal(&mut self, force: bool) {
         if !self.is_dirty && !force {
             return;
         }
 
-        // Only trim trailing whitespace on EXPLICIT manual save (force == true),
-        // NEVER during background auto-save while the user is actively typing!
+        // Defensive normalization of tab state before persisting
+        if self.data.notes.is_empty() {
+            let note = Note::new(
+                "default".to_string(),
+                format!("note_1{}", self.data.settings.default_extension),
+            );
+            self.data.active_note_id = Some("default".to_string());
+            self.data.notes.push(note);
+        }
+
+        // Automatic trailing whitespace trimming on manual Ctrl+S
         if force && self.data.settings.trim_trailing_whitespace {
             for note in &mut self.data.notes {
-                if note
+                let trimmed: String = note
                     .content
                     .lines()
-                    .any(|l| l.ends_with(' ') || l.ends_with('\t'))
-                {
-                    let trimmed: Vec<&str> = note.content.lines().map(|l| l.trim_end()).collect();
-                    let mut new_content = trimmed.join("\n");
-                    if note.content.ends_with('\n') {
-                        new_content.push('\n');
-                    }
-                    note.content = new_content;
+                    .map(|l| l.trim_end())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if trimmed != note.content {
+                    note.content = trimmed;
+                    note.update_timestamp();
                 }
             }
         }
 
         // Sync any externally linked notes directly to their target files on disk
-        let mut sync_errors = Vec::new();
-        let mut linked_count = 0;
-        for note in &self.data.notes {
-            if let Some(ref path_str) = note.file_path {
-                linked_count += 1;
-                let path = std::path::Path::new(path_str);
-                let write_data = if note.is_qn() {
-                    note.encode_qn_binary()
-                } else {
-                    note.content.as_bytes().to_vec()
-                };
-                if let Err(e) = crate::storage::atomic_write_file(path, &write_data) {
-                    sync_errors.push(format!("{}: {}", note.title, e));
-                }
-            }
-        }
+        let sync_res = crate::storage::sync_linked_notes_to_disk(&mut self.data.notes);
+        let (linked_count, sync_errors) = match sync_res {
+            Ok(count) => (count, Vec::new()),
+            Err(errs) => (0, errs),
+        };
 
         // Check save result and re-set dirty on failure
         match crate::storage::save_app_data(&self.data) {
             Ok(()) => {
-                self.is_dirty = false;
+                self.is_dirty = !sync_errors.is_empty();
             }
             Err(e) => {
                 self.is_dirty = true;
@@ -347,14 +414,19 @@ impl QuickyNotesApp {
 
         if !sync_errors.is_empty() {
             self.show_toast(
-                format!("Disk save warning: {}", sync_errors.join(", ")),
-                ToastKind::Warning,
+                format!("Failed to save linked file(s): {}", sync_errors.join(", ")),
+                ToastKind::Error,
             );
         } else if linked_count > 0 {
             self.set_status("Synced & saved");
         } else if !force {
             self.set_status("Auto-saved");
         }
+    }
+
+    /// Checks all open notes that are linked to files on disk, and reloads buffer if modified externally.
+    pub fn reconcile_linked_notes_from_disk(&mut self) -> bool {
+        crate::storage::reconcile_linked_notes_from_disk(&mut self.data.notes)
     }
 
     // -------------------------------------------------------------------------
@@ -441,8 +513,9 @@ impl QuickyNotesApp {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
 
-        // Poll for async file and export dialog completion
+        // Poll for async file, folder, and export dialog completion
         ui::drag_drop::poll_file_dialog(self);
+        ui::drag_drop::poll_folder_dialog(self);
         ui::drag_drop::poll_export_dialog(self);
 
         ui::drag_drop::handle_dropped_files(self, ctx);
@@ -486,11 +559,20 @@ impl QuickyNotesApp {
             }
         }
 
+        // Real-time live disk sync for externally modified files (every 500ms or on window focus)
+        let is_window_focused = ctx.input(|i| i.raw.focused);
+        if self.last_disk_sync.elapsed() > Duration::from_millis(500) || is_window_focused {
+            self.last_disk_sync = Instant::now();
+            if self.reconcile_linked_notes_from_disk() {
+                self.set_status("Live reloaded from disk");
+                ctx.request_repaint();
+            }
+        }
+
         // Render main editor and active drawers
         ui::editor::render_main_editor(self, ctx, ui);
 
         // Render modal overlays
-        ui::editor::render_close_confirmation_modal(self, ctx);
         ui::editor::render_drop_hover_overlay(ctx);
         ui::ai_modal::render_ai_copilot_modal(self, ctx);
     }
@@ -551,6 +633,10 @@ mod tests {
             last_cursor_range: None,
             split_ratio: 0.5,
             last_window_size_check: Instant::now(),
+            folder_workspace: None,
+            show_folder_sidebar: false,
+            folder_dialog_rx: None,
+            last_disk_sync: Instant::now(),
         }
     }
 
@@ -588,6 +674,38 @@ mod tests {
 
         let disk_content = std::fs::read_to_string(&external_file).unwrap();
         assert_eq!(disk_content, "Modified content inside Quicky Notes");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_reconcile_linked_notes_live_reload() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "quicky_notes_test_reload_{}",
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let external_file = temp_dir.join("external_doc.md");
+        std::fs::write(&external_file, "Version 1 on disk").unwrap();
+
+        let mut app = create_test_app();
+        app.open_file_from_path(&external_file);
+
+        let active_note = app.active_note().expect("should have opened note");
+        assert_eq!(active_note.content, "Version 1 on disk");
+
+        // External editor modifies the file on disk
+        std::fs::write(&external_file, "Version 2 modified by external editor!").unwrap();
+
+        // Run live reload reconciliation
+        let reloaded = app.reconcile_linked_notes_from_disk();
+        assert!(reloaded);
+
+        let reloaded_note = app.active_note().expect("should have active note");
+        assert_eq!(
+            reloaded_note.content,
+            "Version 2 modified by external editor!"
+        );
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

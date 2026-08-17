@@ -4,6 +4,7 @@ pub mod ai_modal;
 pub mod context_menu;
 pub mod drag_drop;
 pub mod editor;
+pub mod folder_tree;
 pub mod header;
 pub mod image_view;
 pub mod markdown;

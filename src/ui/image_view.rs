@@ -22,6 +22,15 @@ pub const THUMBNAIL_SCROLL_MAX_WIDTH: f32 = 360.0;
 /// Image preview thumbnail dimension in pixels.
 pub const THUMBNAIL_SIZE: egui::Vec2 = egui::vec2(120.0, 90.0);
 
+/// Minimum proportional scaling factor for rendered images.
+pub const MIN_IMAGE_FONT_SCALE: f32 = 0.5;
+
+/// Maximum proportional scaling factor for rendered images.
+pub const MAX_IMAGE_FONT_SCALE: f32 = 3.0;
+
+/// Minimum display width in pixels for rendered images.
+pub const MIN_IMAGE_DISPLAY_WIDTH: f32 = 32.0;
+
 /// Thread-safe in-memory cache for loaded GPU textures.
 struct TextureCache {
     textures: HashMap<String, TextureHandle>,
@@ -39,16 +48,14 @@ fn get_texture_cache() -> &'static Mutex<TextureCache> {
 
 /// Retrieves or decodes an image attachment into an `egui::TextureHandle`.
 ///
-/// Ensures the image is decoded once and cached in GPU memory using a compound key.
+/// Images are cached in memory by composite key `"{note_id}:{attachment_id}"`.
 pub fn get_or_load_attachment_texture(
     ctx: &egui::Context,
     note_id: &str,
     att: &NoteAttachment,
 ) -> Option<TextureHandle> {
-    let key = format!("{}:{}:{}", note_id, att.id, att.data.len());
-    let mut cache = get_texture_cache()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let key = format!("{}:{}", note_id, att.id);
+    let mut cache = get_texture_cache().lock().unwrap();
 
     if let Some(tex) = cache.textures.get(&key) {
         return Some(tex.clone());
@@ -56,7 +63,7 @@ pub fn get_or_load_attachment_texture(
 
     match decode_color_image(&att.data) {
         Ok(color_img) => {
-            let tex = ctx.load_texture(format!("tex_{}", key), color_img, TextureOptions::LINEAR);
+            let tex = ctx.load_texture(&key, color_img, TextureOptions::LINEAR);
             cache.textures.insert(key, tex.clone());
             Some(tex)
         }
@@ -80,18 +87,24 @@ fn decode_color_image(bytes: &[u8]) -> Result<ColorImage, String> {
     Ok(ColorImage::from_rgba_unmultiplied(size, &pixels))
 }
 
-/// Renders an authentic true-color image widget adhering to strict color fidelity.
+/// Renders an authentic true-color image widget adhering to strict color fidelity and responsive font scaling.
 pub fn render_true_color_image(
     ui: &mut Ui,
     texture: &TextureHandle,
     max_width: f32,
     corner_radius: u8,
+    font_size: f32,
 ) -> Response {
     let size = texture.size_vec2();
-    let available_w = max_width.min(ui.available_width()).max(32.0);
+    let available_w = max_width
+        .min(ui.available_width())
+        .max(MIN_IMAGE_DISPLAY_WIDTH);
 
     let aspect = if size.x > 0.0 { size.y / size.x } else { 1.0 };
-    let display_w = size.x.min(available_w);
+    let font_scale = (font_size / crate::models::settings::DEFAULT_FONT_SIZE)
+        .clamp(MIN_IMAGE_FONT_SCALE, MAX_IMAGE_FONT_SCALE);
+    let scaled_w = size.x * font_scale;
+    let display_w = scaled_w.min(available_w);
     let display_h = display_w * aspect;
 
     let img = egui::Image::new(texture)

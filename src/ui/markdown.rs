@@ -29,6 +29,15 @@ impl MarkdownViewMode {
         }
     }
 
+    /// Display name for view mode.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Edit => "Edit",
+            Self::Split => "Split",
+            Self::Preview => "Preview",
+        }
+    }
+
     /// Display icon for mode switcher.
     pub fn icon(self) -> &'static str {
         match self {
@@ -441,7 +450,7 @@ pub fn render_markdown(
                 });
             }
             MarkdownBlock::Image { alt, url } => {
-                render_markdown_image(ui, &alt, &url, palette, note);
+                render_markdown_image(ui, &alt, &url, palette, note, font_size);
             }
             MarkdownBlock::CodeBlock { lang, content } => {
                 let clean_lang = lang.trim();
@@ -526,13 +535,14 @@ pub fn render_markdown(
     }
 }
 
-/// Helper to render an image block inside Markdown with true colors and zero theme tint.
+/// Helper to render an image block inside Markdown with true colors and responsive font scaling.
 fn render_markdown_image(
     ui: &mut Ui,
     alt: &str,
     url: &str,
     palette: &Palette,
     note: Option<&Note>,
+    font_size: f32,
 ) {
     let clean_url = url.trim();
     let att_id_opt = if clean_url.starts_with("attachment:") {
@@ -557,13 +567,19 @@ fn render_markdown_image(
                 crate::ui::image_view::get_or_load_attachment_texture(ui.ctx(), &n.id, att)
         {
             ui.vertical(|ui| {
-                crate::ui::image_view::render_true_color_image(ui, &tex, ui.available_width(), 6);
+                crate::ui::image_view::render_true_color_image(
+                    ui,
+                    &tex,
+                    ui.available_width(),
+                    6,
+                    font_size,
+                );
 
                 if !alt.is_empty() {
                     ui.add_space(2.0);
                     ui.label(
                         RichText::new(alt)
-                            .font(FontId::proportional(11.0))
+                            .font(FontId::proportional((font_size - 3.0).max(9.0)))
                             .italics()
                             .color(Color32::from_gray(160)),
                     );
@@ -624,12 +640,12 @@ pub mod tests {
     #[test]
     fn test_parse_markdown_blocks_code_highlighting() {
         let md = "```rust\nfn main() {\n    let x = 42;\n}\n```";
-        let palette = Palette {
-            bg: Color32::BLACK,
-            card: Color32::BLACK,
-            border: Color32::DARK_GRAY,
-            accent: Color32::WHITE,
-        };
+        let palette = Palette::new(
+            Color32::BLACK,
+            Color32::BLACK,
+            Color32::DARK_GRAY,
+            Color32::WHITE,
+        );
         let blocks = parse_markdown_blocks(md, 14.0, false, &palette);
         assert_eq!(blocks.len(), 1);
         if let MarkdownBlock::CodeBlock { lang, content } = &blocks[0] {

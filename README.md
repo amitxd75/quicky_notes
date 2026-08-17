@@ -1,53 +1,88 @@
-# quicky_notes
+# Quicky Notes
 
-A lightweight floating glassmorphism note-taking widget for Hyprland and Wayland desktops.
+Lightweight floating glassmorphism note widget and fast code scratchpad for Hyprland, Wayland, and Linux desktops.
 
 ![Quicky Notes](./assets/screenshot-main.png)
 
-## Features
+## Core Highlights
 
-- Wallpaper color auto-sync (Pywal and Caelestia)
-- Native statistical autocomplete engine (Radix Trie and Markov n-gram model)
-- Multi-provider AI Copilot (Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, OpenRouter)
-- Real-time syntax highlighting for 15+ languages in edit and preview modes
-- Portable .qn binary note bundles with embedded image attachments
-- Clipboard image pasting and image preview gallery
-- Direct disk file linking and interactive native export dialogs
-- SQLite WAL storage with atomic JSON backups
-- Fully customizable keybindings and visual theme settings
+- **Adaptive Glassmorphism & Wallpaper Sync**:
+  Real-time dynamic palette extraction from active desktop wallpaper via Pywal and Caelestia caches, alongside curated presets and an AI-driven natural language theme generator.
+
+- **Embedded Predictive Autocomplete**:
+  Zero-latency dual-engine autocomplete combining an in-memory Radix Trie and Markov bigram language model for predictive ghost text and single-key Tab completions.
+
+- **Multi-Provider AI Copilot**:
+  Integrated assistance supporting Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for in-editor refactoring, summaries, explanations, and custom prompts.
+
+- **Portable `.qn` Containers & Direct Disk Linking**:
+  Standalone binary note format with embedded image attachments, plus direct filesystem file and folder workspace editing with external modification detection (`mtime`).
+
+- **Syntax Highlighting & Soft-Wrap Aware Gutter**:
+  Real-time syntax highlighting across 15+ programming languages with pixel-locked line numbers that maintain exact row alignment across wrapped lines.
 
 ![Settings](./assets/screenshot-settings.png)
-
-## Shortcuts
-
-Default keybinding to open settings is `Ctrl + ,`. All keyboard shortcuts can be rebound and configured inside **Settings -> Shortcuts**.
 
 ## Installation
 
 ```bash
+# Using the installer script (binary, desktop entry, and icons)
+./scripts/install.sh
+
+# Or using Cargo
 cargo install --path .
 ```
 
-### Hyprland Configuration
+## CLI Usage
+
+```bash
+# Launch note widget
+quicky
+
+# Open specific files
+quicky note.md main.rs document.qn
+
+# Open folder workspace
+quicky -f ~/projects/my_project
+
+# Launch with folder sidebar open
+quicky --sidebar ~/projects/my_project
+```
+
+## Shortcuts
+
+| Shortcut | Action |
+| :--- | :--- |
+| `Ctrl + N` | New Note Tab |
+| `Ctrl + W` | Close Active Tab |
+| `Ctrl + S` | Save Notes / Linked Files |
+| `Ctrl + O` | Open File Dialog |
+| `Ctrl + Shift + O` | Open Folder Workspace Dialog |
+| `Ctrl + F` | Search Notes |
+| `Ctrl + ,` | Settings / Options |
+| `Ctrl + M` | Cycle Markdown Mode (Edit / Split / Preview) |
+| `Ctrl + Shift + F` | Toggle Folder Sidebar |
+| `Ctrl + Space` | Open AI Copilot |
+| `Tab` | Accept Ghost Autocomplete |
+
+## Hyprland Configuration (Lua)
 
 ```lua
--- Keybind
-hl.bind("SUPER + N", hl.dsp.exec_cmd("quicky_notes"), { desc = "Toggle Quicky Notes" })
+-- Keybinding
+hl.bind("SUPER + N", hl.dsp.exec_cmd("quicky"), { desc = "Toggle Quicky Notes" })
 
 -- Window Rule
 hl.rule({
-    class = "quicky_notes",
+    class = "quicky",
     float = true,
     center = true,
-    opacity = 0.85,
+    size = { 860, 600 },
 })
 ```
 
 ## Documentation
 
 - [Suggestion Engine Architecture](docs/suggestion_engine_architecture.md)
-- [Developer & AI Agent Guidelines](AGENTS.md)
-
 ## License
 
 MIT

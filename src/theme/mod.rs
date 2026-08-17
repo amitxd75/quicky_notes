@@ -78,9 +78,57 @@ pub struct PaletteColors {
     pub card: Color32,
     pub border: Color32,
     pub accent: Color32,
+    pub secondary_accent: Color32,
+    pub text: Color32,
+    pub muted_text: Color32,
+    pub danger: Color32,
+    pub warning: Color32,
+    pub success: Color32,
 }
 
 impl PaletteColors {
+    /// Creates a palette from core theme colors with harmonious semantic defaults.
+    pub fn new(bg: Color32, card: Color32, border: Color32, accent: Color32) -> Self {
+        Self {
+            bg,
+            card,
+            border,
+            accent,
+            secondary_accent: Color32::from_rgb(56, 189, 248),
+            text: Color32::from_gray(240),
+            muted_text: Color32::from_gray(160),
+            danger: Color32::from_rgb(239, 68, 68),
+            warning: Color32::from_rgb(251, 191, 36),
+            success: ACCENT_EMERALD,
+        }
+    }
+
+    /// Creates a fully custom palette with user-defined semantic colors.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_semantic(
+        bg: Color32,
+        card: Color32,
+        border: Color32,
+        accent: Color32,
+        secondary_accent: Color32,
+        text: Color32,
+        muted_text: Color32,
+        danger: Color32,
+    ) -> Self {
+        Self {
+            bg,
+            card,
+            border,
+            accent,
+            secondary_accent,
+            text,
+            muted_text,
+            danger,
+            warning: Color32::from_rgb(251, 191, 36),
+            success: ACCENT_EMERALD,
+        }
+    }
+
     /// Returns a lightened variant of this color with specified alpha.
     #[inline]
     pub fn lighten(color: Color32, amount: u8, alpha: u8) -> Color32 {
@@ -305,12 +353,7 @@ fn parse_caelestia_content(content: &str) -> Option<PaletteColors> {
             .map(|br| Palette::interpolate_color(br, a, 0.45))
             .unwrap_or_else(|| Palette::interpolate_color(card, a, 0.50));
 
-        Some(PaletteColors {
-            bg: ambient_bg,
-            card,
-            border,
-            accent: a,
-        })
+        Some(PaletteColors::new(ambient_bg, card, border, a))
     } else {
         None
     }
@@ -372,12 +415,7 @@ pub fn get_wallpaper_colors() -> Option<PaletteColors> {
         let border = hex_to_color(&data.colors.color1);
         let accent = hex_to_color(&data.colors.color4);
         let card = Palette::lighten(bg, 18, 255);
-        let palette = PaletteColors {
-            bg,
-            card,
-            border,
-            accent,
-        };
+        let palette = PaletteColors::new(bg, card, border, accent);
         if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
             cache.caelestia_mtime = current_caelestia_mtime;
             cache.btop_mtime = current_btop_mtime;
@@ -404,82 +442,102 @@ pub fn check_wallpaper_color_change(last_colors: &mut Option<PaletteColors>) -> 
 /// Resolves theme palette colors according to user settings.
 pub fn get_palette(settings: &AppSettings) -> PaletteColors {
     match settings.theme_mode {
-        ThemeMode::Custom => PaletteColors {
-            bg: Color32::from_rgb(
+        ThemeMode::Custom => PaletteColors::with_semantic(
+            Color32::from_rgb(
                 settings.custom_bg_color[0],
                 settings.custom_bg_color[1],
                 settings.custom_bg_color[2],
             ),
-            card: Color32::from_rgb(
+            Color32::from_rgb(
                 settings.custom_card_color[0],
                 settings.custom_card_color[1],
                 settings.custom_card_color[2],
             ),
-            border: Color32::from_rgb(
+            Color32::from_rgb(
                 settings.custom_border_color[0],
                 settings.custom_border_color[1],
                 settings.custom_border_color[2],
             ),
-            accent: Color32::from_rgb(
+            Color32::from_rgb(
                 settings.custom_accent_color[0],
                 settings.custom_accent_color[1],
                 settings.custom_accent_color[2],
             ),
-        },
+            Color32::from_rgb(
+                settings.custom_secondary_accent_color[0],
+                settings.custom_secondary_accent_color[1],
+                settings.custom_secondary_accent_color[2],
+            ),
+            Color32::from_rgb(
+                settings.custom_text_color[0],
+                settings.custom_text_color[1],
+                settings.custom_text_color[2],
+            ),
+            Color32::from_rgb(
+                settings.custom_muted_text_color[0],
+                settings.custom_muted_text_color[1],
+                settings.custom_muted_text_color[2],
+            ),
+            Color32::from_rgb(
+                settings.custom_danger_color[0],
+                settings.custom_danger_color[1],
+                settings.custom_danger_color[2],
+            ),
+        ),
         ThemeMode::WallpaperSync => {
             if let Some(palette) = get_wallpaper_colors() {
                 palette
             } else {
-                PaletteColors {
-                    bg: Color32::from_rgb(18, 12, 28),
-                    card: Color32::from_rgb(28, 20, 42),
-                    border: Color32::from_rgb(90, 50, 130),
-                    accent: ACCENT_PURPLE,
-                }
+                PaletteColors::new(
+                    Color32::from_rgb(18, 12, 28),
+                    Color32::from_rgb(28, 20, 42),
+                    Color32::from_rgb(90, 50, 130),
+                    ACCENT_PURPLE,
+                )
             }
         }
-        ThemeMode::DarkViolet => PaletteColors {
-            bg: Color32::from_rgb(18, 12, 28),
-            card: Color32::from_rgb(28, 20, 42),
-            border: Color32::from_rgb(90, 50, 130),
-            accent: ACCENT_PURPLE,
-        },
-        ThemeMode::ObsidianEmerald => PaletteColors {
-            bg: Color32::from_rgb(12, 24, 18),
-            card: Color32::from_rgb(20, 38, 30),
-            border: Color32::from_rgb(46, 120, 80),
-            accent: ACCENT_EMERALD,
-        },
-        ThemeMode::CyberpunkCyan => PaletteColors {
-            bg: Color32::from_rgb(10, 22, 32),
-            card: Color32::from_rgb(18, 34, 48),
-            border: Color32::from_rgb(40, 140, 190),
-            accent: Color32::from_rgb(6, 182, 212),
-        },
-        ThemeMode::SunsetAmber => PaletteColors {
-            bg: Color32::from_rgb(28, 16, 12),
-            card: Color32::from_rgb(42, 26, 20),
-            border: Color32::from_rgb(140, 70, 30),
-            accent: ACCENT_AMBER,
-        },
-        ThemeMode::RosePink => PaletteColors {
-            bg: Color32::from_rgb(28, 14, 22),
-            card: Color32::from_rgb(42, 22, 34),
-            border: Color32::from_rgb(150, 60, 110),
-            accent: Color32::from_rgb(236, 72, 153),
-        },
-        ThemeMode::NordicFrost => PaletteColors {
-            bg: Color32::from_rgb(15, 23, 36),
-            card: Color32::from_rgb(24, 34, 52),
-            border: Color32::from_rgb(70, 100, 150),
-            accent: Color32::from_rgb(56, 189, 248),
-        },
-        ThemeMode::OledDark => PaletteColors {
-            bg: Color32::from_rgb(8, 8, 12),
-            card: Color32::from_rgb(18, 18, 24),
-            border: Color32::from_rgb(60, 60, 80),
-            accent: Color32::from_rgb(147, 51, 234),
-        },
+        ThemeMode::DarkViolet => PaletteColors::new(
+            Color32::from_rgb(18, 12, 28),
+            Color32::from_rgb(28, 20, 42),
+            Color32::from_rgb(90, 50, 130),
+            ACCENT_PURPLE,
+        ),
+        ThemeMode::ObsidianEmerald => PaletteColors::new(
+            Color32::from_rgb(12, 24, 18),
+            Color32::from_rgb(20, 38, 30),
+            Color32::from_rgb(46, 120, 80),
+            ACCENT_EMERALD,
+        ),
+        ThemeMode::CyberpunkCyan => PaletteColors::new(
+            Color32::from_rgb(10, 22, 32),
+            Color32::from_rgb(18, 34, 48),
+            Color32::from_rgb(40, 140, 190),
+            Color32::from_rgb(6, 182, 212),
+        ),
+        ThemeMode::SunsetAmber => PaletteColors::new(
+            Color32::from_rgb(28, 16, 12),
+            Color32::from_rgb(42, 26, 20),
+            Color32::from_rgb(140, 70, 30),
+            ACCENT_AMBER,
+        ),
+        ThemeMode::RosePink => PaletteColors::new(
+            Color32::from_rgb(28, 14, 22),
+            Color32::from_rgb(42, 22, 34),
+            Color32::from_rgb(150, 60, 110),
+            Color32::from_rgb(236, 72, 153),
+        ),
+        ThemeMode::NordicFrost => PaletteColors::new(
+            Color32::from_rgb(15, 23, 36),
+            Color32::from_rgb(24, 34, 52),
+            Color32::from_rgb(70, 100, 150),
+            Color32::from_rgb(56, 189, 248),
+        ),
+        ThemeMode::OledDark => PaletteColors::new(
+            Color32::from_rgb(8, 8, 12),
+            Color32::from_rgb(18, 18, 24),
+            Color32::from_rgb(60, 60, 80),
+            Color32::from_rgb(147, 51, 234),
+        ),
     }
 }
 
