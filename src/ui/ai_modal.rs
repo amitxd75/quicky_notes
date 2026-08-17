@@ -312,27 +312,52 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
 
                         ui.add_space(6.0);
 
-                        // 2. Selection Context Indicator
-                        let context_info = if !app.ai_modal.target_text.is_empty() {
-                            let preview_snippet = if app.ai_modal.target_text.len() > 30 {
-                                format!("{}...", &app.ai_modal.target_text[..30])
+                        // 2. Selection Context Indicator Card
+                        if !app.ai_modal.target_text.is_empty() {
+                            let char_count = app.ai_modal.target_text.chars().count();
+                            let preview_snippet: String = app
+                                .ai_modal
+                                .target_text
+                                .chars()
+                                .take(60)
+                                .collect::<String>()
+                                .replace('\n', " ");
+                            let preview_display = if char_count > 60 {
+                                format!("{}...", preview_snippet)
                             } else {
-                                app.ai_modal.target_text.clone()
+                                preview_snippet
                             };
-                            format!(
-                                "Target Selection ({} chars): \"{}\"",
-                                app.ai_modal.target_text.len(),
-                                preview_snippet.replace('\n', " ")
-                            )
-                        } else {
-                            "Cursor Mode: Continue from active cursor position".to_string()
-                        };
 
-                        ui.label(
-                            RichText::new(context_info)
+                            card::settings_card(ui, "TARGET SELECTION", &palette, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(format!("📝 \"{}\"", preview_display))
+                                            .font(FontId::monospace(11.5))
+                                            .color(Color32::from_gray(230)),
+                                    );
+
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(format!("({} chars)", char_count))
+                                                    .font(FontId::proportional(10.5))
+                                                    .color(Color32::from_gray(140)),
+                                            );
+                                        },
+                                    );
+                                });
+                            });
+                        } else {
+                            ui.label(
+                                RichText::new(
+                                    "📍 Note / Cursor Mode: AI will generate content from cursor context",
+                                )
                                 .font(FontId::proportional(11.0))
                                 .color(Color32::from_gray(175)),
-                        );
+                            );
+                        }
+
 
                         ui.add_space(8.0);
 

@@ -243,12 +243,18 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             }
 
             crate::app::MarkdownViewMode::Split => {
-                let half_width = (ui.available_width() - 16.0) / 2.0;
+                let total_width = ui.available_width();
+                let sep_width = 12.0;
+                let usable_width = (total_width - sep_width).max(100.0);
+                app.split_ratio = app.split_ratio.clamp(0.15, 0.85);
+
+                let left_width = usable_width * app.split_ratio;
+                let right_width = (usable_width - left_width).max(50.0);
 
                 ui.horizontal(|ui| {
                     // Left column: Editor
                     ui.vertical(|ui| {
-                        ui.set_width(half_width);
+                        ui.set_width(left_width);
                         ui.set_height(editor_height);
                         egui::ScrollArea::vertical()
                             .id_salt("split_editor_scroll_area")
@@ -288,15 +294,65 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                             });
                     });
 
-                    // Middle vertical divider
-                    ui.separator();
-                    ui.add_space(8.0);
+                    // Middle draggable vertical divider & grip handle
+                    let (sep_rect, sep_resp) = ui.allocate_exact_size(
+                        egui::vec2(sep_width, editor_height),
+                        egui::Sense::click_and_drag(),
+                    );
+
+                    let is_active = sep_resp.hovered() || sep_resp.dragged();
+
+                    if sep_resp.dragged() {
+                        let delta_x = sep_resp.drag_delta().x;
+                        let ratio_delta = delta_x / usable_width;
+                        app.split_ratio = (app.split_ratio + ratio_delta).clamp(0.15, 0.85);
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    } else if sep_resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+
+                    if sep_resp.double_clicked() {
+                        app.split_ratio = 0.5;
+                    }
+
+                    // 1. Divider line from top to bottom
+                    let center_x = sep_rect.center().x;
+                    let line_color = if is_active {
+                        palette.accent
+                    } else {
+                        crate::theme::Palette::with_alpha(palette.border, 180)
+                    };
+                    let line_stroke =
+                        egui::Stroke::new(if is_active { 1.5 } else { 1.0 }, line_color);
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(center_x, sep_rect.min.y),
+                            egui::pos2(center_x, sep_rect.max.y),
+                        ],
+                        line_stroke,
+                    );
+
+                    // 2. Centered draggable grip pill handle
+                    let pill_h = 36.0;
+                    let pill_w = if is_active { 5.0 } else { 3.5 };
+                    let pill_rect = egui::Rect::from_center_size(
+                        egui::pos2(center_x, sep_rect.center().y),
+                        egui::vec2(pill_w, pill_h),
+                    );
+                    let pill_bg = if is_active {
+                        palette.accent
+                    } else {
+                        Color32::from_gray(140)
+                    };
+
+                    ui.painter()
+                        .rect_filled(pill_rect, egui::CornerRadius::same(2), pill_bg);
 
                     // Right column: Live Markdown Preview
                     ui.vertical(|ui| {
-                        ui.set_width(half_width - 8.0);
+                        ui.set_width(right_width);
                         ui.set_height(editor_height);
-                        egui::ScrollArea::vertical()
+                        let split_prev_resp = egui::ScrollArea::vertical()
                             .id_salt("split_preview_scroll_area")
                             .auto_shrink([false, false])
                             .max_height(editor_height)
@@ -313,6 +369,21 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                     );
                                 });
                             });
+
+                        let r = ui.interact(
+                            split_prev_resp.inner_rect,
+                            egui::Id::new("split_preview_ctx_menu"),
+                            egui::Sense::click(),
+                        );
+                        r.context_menu(|ui| {
+                            crate::ui::context_menu::render_editor_context_menu(
+                                ui,
+                                note,
+                                *last_cursor_range,
+                                &palette,
+                                &mut context_menu_action,
+                            );
+                        });
                     });
                 });
             }
@@ -329,8 +400,14 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
         let cursor_range = app.last_cursor_range;
         match action {
             crate::ui::context_menu::ContextMenuAction::LaunchAi => {
+                if let Some((start, end)) = cursor_range
+                    && start < end
+                {
+                    app.last_cursor_range = Some((start, end));
+                }
                 app.trigger_ai_assist();
             }
+
             crate::ui::context_menu::ContextMenuAction::Cut => {
                 if let Some((start, end)) = cursor_range
                     && start < end
@@ -858,16 +935,21 @@ fn render_multiline_editor_pane(
         content_changed,
     );
 
-    let is_rmb = ui.input(|i| {
-        i.pointer.button_down(egui::PointerButton::Secondary)
-            || i.pointer.button_clicked(egui::PointerButton::Secondary)
-    });
+    let is_lmb_clicked = resp.clicked();
 
-    if !accepted {
-        if is_rmb
-            && let Some((start, end)) = current_cursor_range
+    if !accepted && let Some(range) = output.state.cursor.char_range() {
+        let p: usize = range.primary.index.into();
+        let s: usize = range.secondary.index.into();
+        if p != s {
+            // Active non-empty text selection: always record it
+            *last_cursor_range = Some((p.min(s), p.max(s)));
+        } else if is_lmb_clicked || last_cursor_range.is_none() {
+            // User explicitly left-clicked at a point, clearing the selection
+            *last_cursor_range = Some((p, p));
+        } else if let Some((start, end)) = current_cursor_range
             && start < end
         {
+            // Preserve existing selection when right-clicking or opening context menu
             *last_cursor_range = Some((start, end));
             let mut state = egui::text_edit::TextEditState::load(ui.ctx(), resp.id)
                 .unwrap_or_else(|| output.state.clone());
@@ -878,10 +960,6 @@ fn render_multiline_editor_pane(
                     egui::text::CCursor::new(end),
                 )));
             state.store(ui.ctx(), resp.id);
-        } else if let Some(range) = output.state.cursor.char_range() {
-            let p: usize = range.primary.index.into();
-            let s: usize = range.secondary.index.into();
-            *last_cursor_range = Some((p.min(s), p.max(s)));
         }
     }
 

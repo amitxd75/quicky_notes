@@ -352,6 +352,28 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     ctx.request_repaint();
                 }
 
+                // AI Copilot ✨ Button
+                if app.data.settings.ai.enabled {
+                    let ai_btn = button::icon_button(
+                        ui,
+                        "✨",
+                        app.ai_modal.is_open,
+                        &palette,
+                        14.0,
+                        OPTIONS_BTN_SIZE,
+                    );
+
+                    let ai_tooltip = format!(
+                        "AI Copilot & Fixer ({})",
+                        app.shortcut_label(crate::ui::shortcuts::ShortcutAction::AiAssist)
+                    );
+                    if ai_btn.on_hover_text(ai_tooltip).clicked() {
+                        app.trigger_ai_assist();
+                        ctx.request_repaint();
+                    }
+                }
+
+
                 // Markdown Preview Mode Button (📝 / ◫ / 👁) - visible for markdown & .qn files
                 if app.active_note().is_some_and(|n| n.is_markdown()) {
                     let md_active = app.preview_mode != crate::app::MarkdownViewMode::Edit;

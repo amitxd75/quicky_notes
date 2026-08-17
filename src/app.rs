@@ -107,6 +107,9 @@ pub struct QuickyNotesApp {
     /// Last recorded cursor selection character range `(start_idx, end_idx)`.
     pub last_cursor_range: Option<(usize, usize)>,
 
+    /// Split preview ratio (0.15 to 0.85) defining the width of the editor vs preview pane.
+    pub split_ratio: f32,
+
     /// Last timestamp for window size persistence check.
     pub last_window_size_check: Instant,
 }
@@ -164,6 +167,7 @@ impl QuickyNotesApp {
             suggestion_rx: Some(suggest_rx),
             active_ghost_suffix: None,
             last_cursor_range: None,
+            split_ratio: 0.5,
             last_window_size_check: Instant::now(),
         }
     }
@@ -545,6 +549,7 @@ mod tests {
             suggestion_rx: None,
             active_ghost_suffix: None,
             last_cursor_range: None,
+            split_ratio: 0.5,
             last_window_size_check: Instant::now(),
         }
     }
