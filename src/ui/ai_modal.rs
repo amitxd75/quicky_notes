@@ -485,6 +485,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                                 app.data.settings.font_size.clamp(11.0, 15.0),
                                                 app.data.settings.monospace_font,
                                                 &palette,
+                                                None,
                                             );
                                         } else if !active_lang.is_empty() {
                                             let code_font_size =

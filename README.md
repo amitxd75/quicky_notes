@@ -6,32 +6,21 @@ A lightweight floating glassmorphism note-taking widget for Hyprland and Wayland
 
 ## Features
 
-- Wallpaper Color Auto-Sync (Pywal and Caelestia)
-- Native Statistical Autocomplete ([Architecture Docs](docs/suggestion_engine_architecture.md))
+- Wallpaper color auto-sync (Pywal and Caelestia)
+- Native statistical autocomplete engine (Radix Trie and Markov n-gram model)
 - Multi-provider AI Copilot (Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, OpenRouter)
-- Direct disk file linking and atomic saving
-- Live Markdown split preview and syntax highlighting
-- Customizable keybindings and theme settings
+- Real-time syntax highlighting for 15+ languages in edit and preview modes
+- Portable .qn binary note bundles with embedded image attachments
+- Clipboard image pasting and image preview gallery
+- Direct disk file linking and interactive native export dialogs
+- SQLite WAL storage with atomic JSON backups
+- Fully customizable keybindings and visual theme settings
 
 ![Settings](./assets/screenshot-settings.png)
 
-## Keybindings (Default)
+## Shortcuts
 
-All shortcuts can be customized or rebound in **Settings (`Ctrl + ,`) -> Shortcuts**.
-
-- `Super + N` : Toggle window
-- `Ctrl + N` : New tab
-- `Ctrl + W` : Close active tab
-- `Ctrl + S` : Save notes and sync linked files
-- `Ctrl + Enter` : AI Copilot
-- `Ctrl + K` : Search notes
-- `Ctrl + ,` : Settings
-- `Ctrl + P` : Toggle Markdown preview mode
-- `Ctrl + Shift + E` : Export note
-- `Ctrl + Tab` / `Ctrl + Shift + Tab` : Next / Previous tab
-- `Ctrl + 1..9` / `Ctrl + 0` : Switch to tab / Last tab
-- `Ctrl + =` / `Ctrl + -` : Increase / Decrease font size
-- `Tab` : Accept autocomplete suggestion
+Default keybinding to open settings is `Ctrl + ,`. All keyboard shortcuts can be rebound and configured inside **Settings -> Shortcuts**.
 
 ## Installation
 
@@ -39,7 +28,7 @@ All shortcuts can be customized or rebound in **Settings (`Ctrl + ,`) -> Shortcu
 cargo install --path .
 ```
 
-### Hyprland Setup
+### Hyprland Configuration
 
 ```lua
 -- Keybind
@@ -57,6 +46,7 @@ hl.rule({
 ## Documentation
 
 - [Suggestion Engine Architecture](docs/suggestion_engine_architecture.md)
+- [Developer & AI Agent Guidelines](AGENTS.md)
 
 ## License
 

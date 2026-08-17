@@ -7,6 +7,22 @@ use eframe::egui::{
     self, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, ViewportCommand,
 };
 
+/// Tab animation transition time in seconds.
+pub const TAB_ANIM_TIME_SECS: f32 = 0.15;
+
+/// Header tab corner radius in pixels.
+pub const TAB_CORNER_RADIUS: u8 = 8;
+
+/// Default desired width for in-place title editing textbox.
+pub const TITLE_EDIT_DESIRED_WIDTH: f32 = 100.0;
+
+/// Header action button dimensions in pixels.
+pub const HEADER_BTN_SIZE: egui::Vec2 = egui::vec2(34.0, 32.0);
+/// Window control button dimensions (minimize, close) in pixels.
+pub const WINDOW_CTRL_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
+/// Options / search button dimensions in pixels.
+pub const OPTIONS_BTN_SIZE: egui::Vec2 = egui::vec2(32.0, 30.0);
+
 /// Renders the top header bar containing open note tabs and header action buttons.
 pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
     let palette = theme::get_palette(&app.data.settings);
@@ -82,10 +98,11 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             }
                         } else {
                             let base_title = if note.title.trim().is_empty() {
-                                "untitled.txt"
+                                crate::models::DEFAULT_NOTE_TITLE
                             } else {
                                 &note.title
                             };
+
 
                             let title_color = if is_active {
                                 Color32::WHITE
@@ -212,6 +229,8 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
             if let Some(id) = tab_to_select {
                 app.data.active_note_id = Some(id);
+                app.show_options = false;
+                app.show_search = false;
                 app.focus_editor = true;
             }
 
@@ -229,26 +248,32 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
             // '+' New Tab button
             let plus_btn =
-                button::icon_button(ui, "+", false, &palette, 16.0, egui::vec2(34.0, 32.0));
+                button::icon_button(ui, "+", false, &palette, 16.0, HEADER_BTN_SIZE);
 
             let new_tab_tooltip = format!(
                 "New tab ({})",
                 app.shortcut_label(crate::ui::shortcuts::ShortcutAction::NewNote)
             );
             if plus_btn.on_hover_text(new_tab_tooltip).clicked() {
+                app.show_options = false;
+                app.show_search = false;
                 app.create_new_note();
             }
 
             // '📥' Open File button
             let open_file_btn =
-                button::icon_button(ui, "📥", false, &palette, 14.0, egui::vec2(34.0, 32.0));
+                button::icon_button(ui, "📥", false, &palette, 14.0, HEADER_BTN_SIZE);
 
-            if open_file_btn
-                .on_hover_text("Open file from disk (Dolphin/Picker)")
-                .clicked()
-            {
+            let open_file_tooltip = format!(
+                "Open file from disk ({})",
+                app.shortcut_label(crate::ui::shortcuts::ShortcutAction::OpenFile)
+            );
+            if open_file_btn.on_hover_text(open_file_tooltip).clicked() {
+                app.show_options = false;
+                app.show_search = false;
                 crate::ui::drag_drop::open_file_dialog(app);
             }
+
 
             // Window drag area in header
             let space_rect = ui.available_size();
@@ -263,7 +288,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
                 // Close Window (✕) Button
                 let close_app_btn =
-                    button::icon_button(ui, "✕", false, &palette, 13.0, egui::vec2(28.0, 28.0));
+                    button::icon_button(ui, "✕", false, &palette, 13.0, WINDOW_CTRL_BTN_SIZE);
                 if close_app_btn.on_hover_text("Close window").clicked() {
                     app.is_closing = true;
                     app.save_if_dirty();
@@ -272,7 +297,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
                 // Minimize Window (-) Button
                 let min_app_btn =
-                    button::icon_button(ui, "−", false, &palette, 14.0, egui::vec2(28.0, 28.0));
+                    button::icon_button(ui, "−", false, &palette, 14.0, WINDOW_CTRL_BTN_SIZE);
                 if min_app_btn.on_hover_text("Minimize").clicked() {
                     ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
                 }
@@ -284,7 +309,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     app.show_options,
                     &palette,
                     15.0,
-                    egui::vec2(32.0, 30.0),
+                    OPTIONS_BTN_SIZE,
                 );
 
                 let opt_tooltip = format!(
@@ -307,8 +332,9 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     app.show_search,
                     &palette,
                     14.0,
-                    egui::vec2(32.0, 30.0),
+                    OPTIONS_BTN_SIZE,
                 );
+
 
                 let search_tooltip = format!(
                     "Search notes ({})",
@@ -326,7 +352,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     ctx.request_repaint();
                 }
 
-                // Markdown Preview Mode Button (📝 / ◫ / 👁) - only visible for .md files
+                // Markdown Preview Mode Button (📝 / ◫ / 👁) - visible for markdown & .qn files
                 if app.active_note().is_some_and(|n| n.is_markdown()) {
                     let md_active = app.preview_mode != crate::app::MarkdownViewMode::Edit;
                     let md_btn = button::icon_button(

@@ -7,11 +7,15 @@ use serde::{Deserialize, Serialize};
 pub const MIN_OPACITY: f32 = 0.30;
 /// Maximum allowed window opacity.
 pub const MAX_OPACITY: f32 = 1.00;
+/// Default window opacity.
+pub const DEFAULT_OPACITY: f32 = 0.85;
 
 /// Minimum allowed font size in points.
 pub const MIN_FONT_SIZE: f32 = 8.0;
 /// Maximum allowed font size in points.
 pub const MAX_FONT_SIZE: f32 = 36.0;
+/// Default editor font size in points.
+pub const DEFAULT_FONT_SIZE: f32 = 16.0;
 
 /// Minimum allowed window width in pixels.
 pub const MIN_WINDOW_WIDTH: f32 = 480.0;
@@ -27,6 +31,8 @@ pub const MAX_WINDOW_HEIGHT: f32 = 2160.0;
 pub const MIN_AUTO_SAVE_SECS: u32 = 1;
 /// Maximum allowed auto-save interval in seconds.
 pub const MAX_AUTO_SAVE_SECS: u32 = 60;
+/// Default auto-save interval in seconds.
+pub const DEFAULT_AUTO_SAVE_SECS: u32 = 2;
 
 /// Minimum allowed glass blur strength / hardness.
 pub const MIN_BLUR_STRENGTH: f32 = 0.0;
@@ -35,12 +41,27 @@ pub const MAX_BLUR_STRENGTH: f32 = 1.0;
 /// Default glass blur strength / hardness.
 pub const DEFAULT_BLUR_STRENGTH: f32 = 0.75;
 
+/// Minimum allowed tab indentation width in spaces.
+pub const MIN_TAB_SIZE: u32 = 2;
+/// Maximum allowed tab indentation width in spaces.
+pub const MAX_TAB_SIZE: u32 = 8;
+/// Default tab indentation width in spaces.
+pub const DEFAULT_TAB_SIZE: u32 = 4;
+
+/// Minimum window corner radius in pixels.
+pub const MIN_CORNER_RADIUS: f32 = 4.0;
+/// Maximum window corner radius in pixels.
+pub const MAX_CORNER_RADIUS: f32 = 24.0;
+/// Default window corner radius in pixels.
+pub const DEFAULT_CORNER_RADIUS: f32 = 14.0;
+
 /// Pre-defined window dimension presets for Quicky Notes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowSizePreset {
     pub label: &'static str,
     pub width: f32,
     pub height: f32,
+    pub default_font_size: f32,
 }
 
 impl WindowSizePreset {
@@ -48,26 +69,56 @@ impl WindowSizePreset {
         label: "Compact",
         width: 780.0,
         height: 520.0,
+        default_font_size: 13.5,
     };
     pub const STANDARD: Self = Self {
         label: "Standard",
         width: 880.0,
         height: 580.0,
+        default_font_size: 15.0,
     };
     pub const WIDE: Self = Self {
         label: "Wide",
         width: 1024.0,
         height: 640.0,
+        default_font_size: 16.0,
     };
     pub const LARGE: Self = Self {
         label: "Large",
         width: 1180.0,
         height: 720.0,
+        default_font_size: 17.5,
+    };
+    pub const XL: Self = Self {
+        label: "XL",
+        width: 1360.0,
+        height: 820.0,
+        default_font_size: 19.0,
+    };
+    pub const ULTRAWIDE: Self = Self {
+        label: "Ultrawide",
+        width: 1560.0,
+        height: 900.0,
+        default_font_size: 20.5,
+    };
+    pub const STUDIO: Self = Self {
+        label: "Studio 2K",
+        width: 1780.0,
+        height: 1000.0,
+        default_font_size: 22.0,
     };
 
     /// Returns list of all available window size presets.
     pub const fn all() -> &'static [Self] {
-        &[Self::COMPACT, Self::STANDARD, Self::WIDE, Self::LARGE]
+        &[
+            Self::COMPACT,
+            Self::STANDARD,
+            Self::WIDE,
+            Self::LARGE,
+            Self::XL,
+            Self::ULTRAWIDE,
+            Self::STUDIO,
+        ]
     }
 }
 
@@ -230,18 +281,18 @@ const fn default_corner_radius() -> f32 {
     14.0
 }
 fn default_extension() -> String {
-    ".txt".to_string()
+    ".qn".to_string()
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            opacity: 0.85,
-            font_size: 16.0,
+            opacity: DEFAULT_OPACITY,
+            font_size: DEFAULT_FONT_SIZE,
             monospace_font: true,
             always_on_top: true,
             dark_mode: true,
-            auto_save_seconds: 2,
+            auto_save_seconds: DEFAULT_AUTO_SAVE_SECS,
             window_width: WindowSizePreset::STANDARD.width,
             window_height: WindowSizePreset::STANDARD.height,
             theme_mode: ThemeMode::WallpaperSync,
@@ -255,12 +306,12 @@ impl Default for AppSettings {
             custom_danger_color: default_custom_danger(),
             selected_font: "Default".to_string(),
             show_line_numbers: true,
-            tab_size: 4,
+            tab_size: DEFAULT_TAB_SIZE,
             show_status_bar: true,
             confirm_close_tab: true,
             trim_trailing_whitespace: false,
-            corner_radius: 14.0,
-            default_extension: ".txt".to_string(),
+            corner_radius: DEFAULT_CORNER_RADIUS,
+            default_extension: ".qn".to_string(),
             keybindings: crate::ui::shortcuts::KeyBindings::default(),
             ai: crate::ai::AiSettings::default(),
             enable_syntax_highlighting: true,
@@ -276,7 +327,7 @@ impl AppSettings {
         self.keybindings.ensure_all_actions_present();
 
         if self.opacity.is_nan() {
-            self.opacity = 0.85;
+            self.opacity = DEFAULT_OPACITY;
         } else {
             self.opacity = self.opacity.clamp(MIN_OPACITY, MAX_OPACITY);
         }
@@ -290,7 +341,7 @@ impl AppSettings {
         }
 
         if self.font_size.is_nan() {
-            self.font_size = 16.0;
+            self.font_size = DEFAULT_FONT_SIZE;
         } else {
             self.font_size = self.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
         }
@@ -313,16 +364,21 @@ impl AppSettings {
             .auto_save_seconds
             .clamp(MIN_AUTO_SAVE_SECS, MAX_AUTO_SAVE_SECS);
 
-        self.tab_size = self.tab_size.clamp(2, 8);
+        self.tab_size = self.tab_size.clamp(MIN_TAB_SIZE, MAX_TAB_SIZE);
 
         if self.corner_radius.is_nan() {
-            self.corner_radius = 14.0;
+            self.corner_radius = DEFAULT_CORNER_RADIUS;
         } else {
-            self.corner_radius = self.corner_radius.clamp(4.0, 24.0);
+            self.corner_radius = self
+                .corner_radius
+                .clamp(MIN_CORNER_RADIUS, MAX_CORNER_RADIUS);
         }
 
-        if self.default_extension != ".txt" && self.default_extension != ".md" {
-            self.default_extension = ".txt".to_string();
+        if self.default_extension != ".qn"
+            && self.default_extension != ".md"
+            && self.default_extension != ".txt"
+        {
+            self.default_extension = ".qn".to_string();
         }
 
         if self.selected_font.trim().is_empty() {
@@ -404,7 +460,7 @@ mod tests {
         assert_eq!(settings.window_height, MIN_WINDOW_HEIGHT);
         assert_eq!(settings.tab_size, 8);
         assert_eq!(settings.corner_radius, 24.0);
-        assert_eq!(settings.default_extension, ".txt");
+        assert_eq!(settings.default_extension, ".qn");
         assert_eq!(settings.selected_font, "Default");
 
         // Test max clamping

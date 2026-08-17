@@ -338,13 +338,18 @@ fn render_general_core_card(
             "Default Note Format",
             &mut ext,
             [
-                (".txt Text", ".txt".to_string()),
+                (".qn Quicky", ".qn".to_string()),
                 (".md Markdown", ".md".to_string()),
+                (".txt Text", ".txt".to_string()),
             ],
             palette,
         ) {
             app.data.settings.default_extension = ext;
             app.is_dirty = true;
+            let _ = crate::storage::AppData::save_settings_to_path(
+                &app.data.settings,
+                &crate::storage::AppData::config_path(),
+            );
             ctx.request_repaint();
         }
 
@@ -661,13 +666,25 @@ fn render_window_presets_card(
                 let h = preset.height;
                 let is_active = (app.data.settings.window_width - w).abs() < 5.0
                     && (app.data.settings.window_height - h).abs() < 5.0;
-                let label = format!("{} ({}x{})", preset.label, w as u32, h as u32);
+                let label = format!(
+                    "{} ({}x{} • {:.1}pt)",
+                    preset.label, w as u32, h as u32, preset.default_font_size
+                );
 
                 if button::selection_pill(ui, &label, is_active, palette).clicked() {
                     app.data.settings.window_width = w;
                     app.data.settings.window_height = h;
+                    app.data.settings.font_size = preset.default_font_size;
+                    app.data.settings.validate_and_clamp();
                     ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(w, h)));
                     app.is_dirty = true;
+                    app.show_toast(
+                        format!(
+                            "Resized to {} ({:.1}pt font)",
+                            preset.label, preset.default_font_size
+                        ),
+                        crate::ui::toast::ToastKind::Success,
+                    );
                     ctx.request_repaint();
                 }
             }
@@ -840,12 +857,17 @@ fn render_editor_behavior_card(
             "Default New Note Format",
             &mut app.data.settings.default_extension,
             [
-                ("Text (.txt)", ".txt".to_string()),
-                ("Markdown (.md)", ".md".to_string()),
+                (".qn (Quicky)", ".qn".to_string()),
+                (".md (Markdown)", ".md".to_string()),
+                (".txt (Text)", ".txt".to_string()),
             ],
             palette,
         ) {
             app.is_dirty = true;
+            let _ = crate::storage::AppData::save_settings_to_path(
+                &app.data.settings,
+                &crate::storage::AppData::config_path(),
+            );
             ctx.request_repaint();
         }
 

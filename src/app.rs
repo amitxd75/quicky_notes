@@ -68,6 +68,9 @@ pub struct QuickyNotesApp {
     /// Receiver for async file dialog results.
     pub file_dialog_rx: Option<mpsc::Receiver<Option<String>>>,
 
+    /// Receiver for async file export dialog results.
+    pub export_dialog_rx: Option<mpsc::Receiver<Result<String, String>>>,
+
     /// Receiver for async font loading results.
     pub font_loading_rx: Option<mpsc::Receiver<egui::FontDefinitions>>,
 
@@ -147,7 +150,9 @@ impl QuickyNotesApp {
             is_closing: false,
             is_dirty: false,
             file_dialog_rx: None,
+            export_dialog_rx: None,
             font_loading_rx: Some(font_rx),
+
             cached_active_stats: (0, 0, 0),
             recording_shortcut: None,
             toast: None,
@@ -313,7 +318,12 @@ impl QuickyNotesApp {
             if let Some(ref path_str) = note.file_path {
                 linked_count += 1;
                 let path = std::path::Path::new(path_str);
-                if let Err(e) = crate::storage::atomic_write_file(path, note.content.as_bytes()) {
+                let write_data = if note.is_qn() {
+                    note.encode_qn_binary()
+                } else {
+                    note.content.as_bytes().to_vec()
+                };
+                if let Err(e) = crate::storage::atomic_write_file(path, &write_data) {
                     sync_errors.push(format!("{}: {}", note.title, e));
                 }
             }
@@ -427,8 +437,9 @@ impl QuickyNotesApp {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
 
-        // Poll for async file dialog completion
+        // Poll for async file and export dialog completion
         ui::drag_drop::poll_file_dialog(self);
+        ui::drag_drop::poll_export_dialog(self);
 
         ui::drag_drop::handle_dropped_files(self, ctx);
         ui::shortcuts::handle_keyboard_shortcuts(self, ctx);
@@ -520,7 +531,9 @@ mod tests {
             is_closing: false,
             is_dirty: false,
             file_dialog_rx: None,
+            export_dialog_rx: None,
             font_loading_rx: None,
+
             cached_active_stats: (0, 0, 0),
             recording_shortcut: None,
             toast: None,

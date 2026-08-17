@@ -255,8 +255,10 @@ impl AppData {
     /// Enforces storage data invariants.
     pub fn sanitize_and_validate(&mut self) {
         if self.notes.is_empty() {
-            self.notes
-                .push(Note::new("note-1".to_string(), "untitled.txt".to_string()));
+            self.notes.push(Note::new(
+                "note-1".to_string(),
+                crate::models::DEFAULT_NOTE_TITLE.to_string(),
+            ));
         }
 
         let mut seen_ids = HashSet::new();
@@ -284,18 +286,27 @@ impl AppData {
 
     /// Generates default initial notes for first launch.
     pub fn default_initial() -> Self {
-        let mut hello_rs = Note::new("note-1".to_string(), "hello.rs".to_string());
-        hello_rs.content = r#"// ✨ Quicky Notes — Developer Scratchpad
-// Try AI Copilot & Fixer: Select any text and press Ctrl+Enter!
+        let mut welcome_qn = Note::new("note-1".to_string(), "welcome.qn".to_string());
+        welcome_qn.content = r#"# ✨ Quicky Notes — Markdown & Images
 
+Welcome to your fast, lightweight floating scratchpad!
+
+## 🚀 Features
+- **Embedded Images**: Drag & drop screenshots or images directly into your notes.
+- **True-Color Rendering**: Images render in authentic, unaltered colors without theme tinting.
+- **Markdown & Code**: Live syntax highlighting, task lists, and split preview mode.
+- **AI Copilot**: Select text and press `Ctrl+Enter` to fix, summarize, or translate.
+
+```rust
 fn main() {
-    println!("Hello, World from Quicky Notes! 🚀");
+    println!("Hello from Quicky Notes .qn bundle! 🚀");
 }
+```
 "#
         .to_string();
 
         Self {
-            notes: vec![hello_rs],
+            notes: vec![welcome_qn],
             active_note_id: Some("note-1".to_string()),
             settings: AppSettings::default(),
         }

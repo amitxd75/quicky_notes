@@ -5,7 +5,9 @@ pub mod context_menu;
 pub mod drag_drop;
 pub mod editor;
 pub mod header;
+pub mod image_view;
 pub mod markdown;
+
 pub mod options_drawer;
 pub mod search_drawer;
 pub mod shortcuts;

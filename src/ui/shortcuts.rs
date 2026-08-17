@@ -6,13 +6,19 @@ use eframe::egui::{self, ViewportCommand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Font size scaling step increment in points.
+pub const FONT_SIZE_STEP: f32 = 1.0;
+
 /// Identifies all triggerable keyboard shortcut actions in Quicky Notes.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShortcutAction {
     NewNote,
     CloseNote,
     SaveNotes,
+    OpenFile,
+    AttachImage,
     ToggleMarkdown,
     SearchNotes,
     OpenSettings,
@@ -41,6 +47,8 @@ impl ShortcutAction {
         Self::NewNote,
         Self::CloseNote,
         Self::SaveNotes,
+        Self::OpenFile,
+        Self::AttachImage,
         Self::ToggleMarkdown,
         Self::AiAssist,
         Self::SearchNotes,
@@ -69,6 +77,8 @@ impl ShortcutAction {
             Self::NewNote => "New Note Tab",
             Self::CloseNote => "Close Active Tab",
             Self::SaveNotes => "Save Notes to Disk",
+            Self::OpenFile => "Open / Import File from Disk",
+            Self::AttachImage => "Attach Image from Disk",
             Self::ToggleMarkdown => "Toggle Markdown Preview",
             Self::AiAssist => "AI Copilot & Fixer",
             Self::SearchNotes => "Search & Browse Notes",
@@ -108,9 +118,12 @@ impl ShortcutAction {
             | Self::SwitchTab9
             | Self::SwitchLastTab => "Tabs & Navigation",
 
-            Self::NewNote | Self::CloseNote | Self::SaveNotes | Self::ExportNote => {
-                "Note Operations"
-            }
+            Self::NewNote
+            | Self::CloseNote
+            | Self::SaveNotes
+            | Self::ExportNote
+            | Self::OpenFile
+            | Self::AttachImage => "Note Operations",
 
             Self::ToggleMarkdown
             | Self::AiAssist
@@ -127,6 +140,8 @@ impl ShortcutAction {
             Self::NewNote => KeyBinding::ctrl("N"),
             Self::CloseNote => KeyBinding::ctrl("W"),
             Self::SaveNotes => KeyBinding::ctrl("S"),
+            Self::OpenFile => KeyBinding::ctrl("O"),
+            Self::AttachImage => KeyBinding::ctrl_shift("I"),
             Self::ToggleMarkdown => KeyBinding::ctrl("P"),
             Self::AiAssist => KeyBinding::ctrl("Enter"),
             Self::SearchNotes => KeyBinding::ctrl("K"),
@@ -677,6 +692,8 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         };
 
         app.data.active_note_id = Some(app.data.notes[next_idx].id.clone());
+        app.show_options = false;
+        app.show_search = false;
         app.focus_editor = true;
         ctx.request_repaint();
     }
@@ -687,6 +704,8 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     let trigger_new_note = ctx.input(|i| kb.get(ShortcutAction::NewNote).matches_input(i));
     let trigger_close_note = ctx.input(|i| kb.get(ShortcutAction::CloseNote).matches_input(i));
     let trigger_save = ctx.input(|i| kb.get(ShortcutAction::SaveNotes).matches_input(i));
+    let trigger_open_file = ctx.input(|i| kb.get(ShortcutAction::OpenFile).matches_input(i));
+    let trigger_attach_image = ctx.input(|i| kb.get(ShortcutAction::AttachImage).matches_input(i));
     let trigger_markdown = ctx.input(|i| kb.get(ShortcutAction::ToggleMarkdown).matches_input(i));
 
     // Consume AI assist key so TextEdit doesn't insert an unwanted newline
@@ -737,6 +756,8 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             && let Some(note) = app.data.notes.get(idx)
         {
             app.data.active_note_id = Some(note.id.clone());
+            app.show_options = false;
+            app.show_search = false;
             app.focus_editor = true;
             ctx.request_repaint();
         }
@@ -746,12 +767,28 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         && let Some(note) = app.data.notes.last()
     {
         app.data.active_note_id = Some(note.id.clone());
+        app.show_options = false;
+        app.show_search = false;
         app.focus_editor = true;
         ctx.request_repaint();
     }
 
     if trigger_new_note {
+        app.show_options = false;
+        app.show_search = false;
         app.create_new_note();
+    }
+
+    if trigger_open_file {
+        app.show_options = false;
+        app.show_search = false;
+        ui::drag_drop::open_file_dialog(app);
+    }
+
+    if trigger_attach_image {
+        app.show_options = false;
+        app.show_search = false;
+        ui::drag_drop::open_image_dialog(app);
     }
 
     if trigger_close_note && let Some(id) = app.data.active_note_id.clone() {
@@ -814,21 +851,69 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     }
 
     if trigger_font_inc {
-        app.data.settings.font_size = (app.data.settings.font_size + 1.0).min(36.0);
+        app.data.settings.font_size = (app.data.settings.font_size + FONT_SIZE_STEP)
+            .min(crate::models::settings::MAX_FONT_SIZE);
         app.data.settings.validate_and_clamp();
         app.is_dirty = true;
-        let _ = app.data.save();
-        app.set_status(format!("Font size: {:.0}pt", app.data.settings.font_size));
+        let _ = crate::storage::AppData::save_settings_to_path(
+            &app.data.settings,
+            &crate::storage::AppData::config_path(),
+        );
+        app.set_status(format!(
+            "Font size: {:.0}pt (saved)",
+            app.data.settings.font_size
+        ));
         ctx.request_repaint();
     }
 
     if trigger_font_dec {
-        app.data.settings.font_size = (app.data.settings.font_size - 1.0).max(8.0);
+        app.data.settings.font_size = (app.data.settings.font_size - FONT_SIZE_STEP)
+            .max(crate::models::settings::MIN_FONT_SIZE);
         app.data.settings.validate_and_clamp();
         app.is_dirty = true;
-        let _ = app.data.save();
-        app.set_status(format!("Font size: {:.0}pt", app.data.settings.font_size));
+        let _ = crate::storage::AppData::save_settings_to_path(
+            &app.data.settings,
+            &crate::storage::AppData::config_path(),
+        );
+        app.set_status(format!(
+            "Font size: {:.0}pt (saved)",
+            app.data.settings.font_size
+        ));
         ctx.request_repaint();
+    }
+
+    // Direct Ctrl+V clipboard handler (prioritizes image screenshot/file paste)
+    let is_paste_key = ctx.input_mut(|i| {
+        i.consume_key(egui::Modifiers::CTRL, egui::Key::V)
+            || i.consume_key(egui::Modifiers::COMMAND, egui::Key::V)
+            || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V))
+    });
+
+    if is_paste_key {
+        if let Some((name, mime, bytes)) = crate::ui::context_menu::get_clipboard_image() {
+            let cursor_range = app.last_cursor_range;
+            crate::ui::drag_drop::attach_image_to_active_note_at_cursor(
+                app,
+                &name,
+                mime,
+                bytes,
+                cursor_range,
+            );
+            ctx.request_repaint();
+        } else {
+            let cursor_range = app.last_cursor_range;
+            let clip = crate::ui::context_menu::get_clipboard_text();
+            if !clip.is_empty()
+                && let Some(note) = app.active_note_mut()
+            {
+                let s = cursor_range.map_or(note.char_len(), |(st, _)| st);
+                crate::ui::context_menu::insert_or_replace_text(note, &clip, cursor_range);
+                let new_pos = s + clip.chars().count();
+                app.last_cursor_range = Some((new_pos, new_pos));
+                app.is_dirty = true;
+                ctx.request_repaint();
+            }
+        }
     }
 
     // 4. Modal and drawer specific key handling

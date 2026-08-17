@@ -1,8 +1,8 @@
-//! SQLite database backend for notes persistence and tab ordering.
+//! SQLite database backend for notes persistence, attachments, and tab ordering.
 //!
-//! Provides transactional ACID storage for notes, metadata, and tab positions.
+//! Provides transactional ACID storage for notes, metadata, attachments, and tab positions.
 
-use crate::models::Note;
+use crate::models::{Note, NoteAttachment};
 use directories::ProjectDirs;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::fs;
@@ -50,7 +50,7 @@ impl Database {
         Ok(db)
     }
 
-    /// Initializes SQL schema tables and indexes.
+    /// Initializes SQL schema tables, migrations, and indexes.
     fn init_schema(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute_batch(
             "
@@ -63,7 +63,8 @@ impl Database {
                 updated_at TEXT NOT NULL,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 color_tag TEXT,
-                position INTEGER NOT NULL
+                position INTEGER NOT NULL,
+                attachments TEXT
             );
 
             CREATE TABLE IF NOT EXISTS app_meta (
@@ -74,13 +75,31 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_notes_position ON notes(position);
             ",
         )?;
+
+        // Migration: ensure attachments column exists for existing installations
+        let has_attachments: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='attachments'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_attachments {
+            let _ = self
+                .conn
+                .execute("ALTER TABLE notes ADD COLUMN attachments TEXT", []);
+        }
+
         Ok(())
     }
 
     /// Loads all notes ordered by tab position, plus the active note ID.
     pub fn load_all_notes(&self) -> Result<(Vec<Note>, Option<String>), rusqlite::Error> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, content, file_path, created_at, updated_at, pinned, color_tag FROM notes ORDER BY position ASC",
+            "SELECT id, title, content, file_path, created_at, updated_at, pinned, color_tag, attachments FROM notes ORDER BY position ASC",
         )?;
 
         let note_iter = stmt.query_map([], |row| {
@@ -92,6 +111,12 @@ impl Database {
             let updated_at: String = row.get(5)?;
             let pinned_int: i64 = row.get(6)?;
             let color_tag: Option<String> = row.get(7)?;
+            let attachments_raw: Option<String> = row.get(8)?;
+
+            let attachments: Vec<NoteAttachment> = attachments_raw
+                .as_deref()
+                .and_then(|json_str| serde_json::from_str(json_str).ok())
+                .unwrap_or_default();
 
             Ok(Note {
                 id,
@@ -102,6 +127,7 @@ impl Database {
                 updated_at,
                 pinned: pinned_int != 0,
                 color_tag,
+                attachments,
             })
         })?;
 
@@ -135,10 +161,12 @@ impl Database {
 
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO notes (id, title, content, file_path, created_at, updated_at, pinned, color_tag, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO notes (id, title, content, file_path, created_at, updated_at, pinned, color_tag, position, attachments) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
 
             for (pos, note) in notes.iter().enumerate() {
+                let attachments_json = serde_json::to_string(&note.attachments).unwrap_or_default();
+
                 stmt.execute(params![
                     note.id,
                     note.title,
@@ -148,7 +176,8 @@ impl Database {
                     note.updated_at,
                     if note.pinned { 1i64 } else { 0i64 },
                     note.color_tag,
-                    pos as i64
+                    pos as i64,
+                    attachments_json
                 ])?;
             }
         }
@@ -181,13 +210,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sqlite_in_memory_crud() {
+    fn test_sqlite_in_memory_crud_with_attachments() {
         let mut db = Database::in_memory().expect("Failed to create in-memory database");
 
-        let mut note1 = Note::new("id-1".into(), "First Note".into());
+        let mut note1 = Note::new("id-1".into(), "First Note.qn".into());
         note1.content = "Hello SQLite".into();
+        let att_id = note1.add_attachment("test.png", "image/png", vec![10, 20, 30, 40]);
 
-        let mut note2 = Note::new("id-2".into(), "Second Note".into());
+        let mut note2 = Note::new("id-2".into(), "Second Note.qn".into());
         note2.content = "Second content".into();
 
         let notes = vec![note1.clone(), note2.clone()];
@@ -196,7 +226,10 @@ mod tests {
 
         let (loaded_notes, active_id) = db.load_all_notes().expect("Failed to load notes");
         assert_eq!(loaded_notes.len(), 2);
-        assert_eq!(loaded_notes[0].title, "First Note");
+        assert_eq!(loaded_notes[0].title, "First Note.qn");
+        assert_eq!(loaded_notes[0].attachments.len(), 1);
+        assert_eq!(loaded_notes[0].attachments[0].id, att_id);
+        assert_eq!(loaded_notes[0].attachments[0].data, vec![10, 20, 30, 40]);
         assert_eq!(loaded_notes[1].content, "Second content");
         assert_eq!(active_id, Some("id-2".into()));
     }

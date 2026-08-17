@@ -12,7 +12,10 @@ use super::tokenizer::format_suffix_casing;
 const MAGIC_BYTES: &[u8; 4] = b"QNW1";
 
 /// Maximum recursion depth allowed during candidate suffix traversal to guarantee strict execution bounds.
-const MAX_SEARCH_DEPTH: usize = 12;
+pub const MAX_SEARCH_DEPTH: usize = 12;
+
+/// Multiplier applied to user typing frequency to prioritize local user vocabulary.
+pub const USER_WEIGHT_MULTIPLIER: u64 = 100_000;
 
 /// Embedded binary dictionary containing ~333,000 frequency-ranked English words.
 static EMBEDDED_WORDS_BIN: &[u8] = include_bytes!("../../../assets/words.bin");
@@ -50,10 +53,10 @@ impl RadixNode {
 
     /// Computes the composite priority score for this node.
     ///
-    /// User-reinforced words receive a $100{,}000\times$ multiplier over standard dictionary base weights.
+    /// User-reinforced words receive a multiplier over standard dictionary base weights.
     #[inline]
     pub fn score(&self) -> u64 {
-        (self.user_weight as u64) * 100_000 + (self.base_weight as u64)
+        (self.user_weight as u64) * USER_WEIGHT_MULTIPLIER + (self.base_weight as u64)
     }
 
     /// Inserts a word and its associated weights into this branch of the Radix Trie.
