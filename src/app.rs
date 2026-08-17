@@ -7,7 +7,7 @@ use crate::ui;
 pub use crate::ui::markdown::MarkdownViewMode;
 pub use crate::ui::options_drawer::SettingsTab;
 pub use crate::ui::toast::{Toast, ToastKind};
-use eframe::egui::{self, Ui, ViewportCommand};
+use eframe::egui::{self, Color32, Ui, ViewportCommand};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -133,6 +133,35 @@ pub struct QuickyNotesApp {
 
     /// Plugin management subsystem for Rhai script extensions.
     pub plugin_manager: crate::plugins::PluginManager,
+
+    /// Active bottom output console panel state.
+    pub active_plugin_panel: Option<PluginPanelDisplayState>,
+
+    /// Tracking map of (plugin_id, timer_id) -> last_fired Instant.
+    pub plugin_timer_last_fired: std::collections::HashMap<(String, String), Instant>,
+
+    /// Temporary accent color override set dynamically by plugins.
+    pub custom_accent_override: Option<Color32>,
+}
+
+/// Active bottom console / output panel state displayed below the editor.
+#[derive(Debug, Clone)]
+pub struct PluginPanelDisplayState {
+    pub title: String,
+    pub content: String,
+    pub height: f32,
+    pub auto_scroll: bool,
+}
+
+impl Default for PluginPanelDisplayState {
+    fn default() -> Self {
+        Self {
+            title: "Output Console".to_string(),
+            content: String::new(),
+            height: 160.0,
+            auto_scroll: true,
+        }
+    }
 }
 
 impl QuickyNotesApp {
@@ -205,6 +234,9 @@ impl QuickyNotesApp {
             folder_dialog_rx: None,
             last_disk_sync: Instant::now(),
             plugin_manager,
+            active_plugin_panel: None,
+            plugin_timer_last_fired: std::collections::HashMap::new(),
+            custom_accent_override: None,
         }
     }
 
@@ -352,6 +384,96 @@ impl QuickyNotesApp {
         {
             let _ = clipboard.set_text(clipboard_text);
         }
+
+        for panel_action in outcome.panel_actions {
+            match panel_action {
+                crate::plugins::PanelAction::Show { title, content } => {
+                    self.active_plugin_panel = Some(PluginPanelDisplayState {
+                        title,
+                        content,
+                        height: 160.0,
+                        auto_scroll: true,
+                    });
+                }
+                crate::plugins::PanelAction::Append(text) => {
+                    if let Some(panel) = &mut self.active_plugin_panel {
+                        panel.content.push_str(&text);
+                    } else {
+                        self.active_plugin_panel = Some(PluginPanelDisplayState {
+                            title: "Output Console".to_string(),
+                            content: text,
+                            height: 160.0,
+                            auto_scroll: true,
+                        });
+                    }
+                }
+                crate::plugins::PanelAction::SetContent(content) => {
+                    if let Some(panel) = &mut self.active_plugin_panel {
+                        panel.content = content;
+                    }
+                }
+                crate::plugins::PanelAction::Clear => {
+                    if let Some(panel) = &mut self.active_plugin_panel {
+                        panel.content.clear();
+                    }
+                }
+                crate::plugins::PanelAction::Hide => {
+                    self.active_plugin_panel = None;
+                }
+            }
+        }
+
+        for theme_mutation in outcome.theme_mutations {
+            match theme_mutation {
+                crate::plugins::ThemeMutation::SetAccent(hex) => {
+                    self.custom_accent_override = Some(crate::theme::hex_to_color(&hex));
+                }
+                crate::plugins::ThemeMutation::ResetAccent => {
+                    self.custom_accent_override = None;
+                }
+            }
+        }
+    }
+
+    /// Returns the active theme palette with any active plugin accent overrides applied.
+    pub fn active_palette(&self) -> crate::theme::Palette {
+        let mut p = crate::theme::get_palette(&self.data.settings);
+        if let Some(accent) = self.custom_accent_override {
+            p.accent = accent;
+        }
+        p
+    }
+
+    /// Checks periodic plugin timers and dispatches ticks when their interval elapses.
+    pub fn poll_plugin_timers(&mut self) {
+        if !self.data.settings.plugins.enabled {
+            return;
+        }
+        let now = Instant::now();
+        let active_timers = self.plugin_manager.all_timers();
+        let mut to_dispatch = Vec::new();
+
+        for (pid, timer) in active_timers {
+            let key = (pid.to_string(), timer.id.clone());
+            let should_fire = match self.plugin_timer_last_fired.get(&key) {
+                Some(last) => now.duration_since(*last).as_secs() >= timer.interval_seconds,
+                None => true,
+            };
+            if should_fire {
+                self.plugin_timer_last_fired.insert(key, now);
+                to_dispatch.push((pid.to_string(), timer.id.clone()));
+            }
+        }
+
+        for (pid, timer_id) in to_dispatch {
+            let note = self.active_note();
+            let cursor = self.last_cursor_range;
+            let palette = self.active_palette();
+            let outcome = self
+                .plugin_manager
+                .dispatch_timer(&pid, &timer_id, note, cursor, &palette);
+            self.apply_plugin_outcome(outcome);
+        }
     }
 
     /// Dispatches a custom header icon button click to active plugins.
@@ -361,9 +483,10 @@ impl QuickyNotesApp {
         }
         let note = self.active_note();
         let cursor = self.last_cursor_range;
+        let palette = self.active_palette();
         let outcome = self
             .plugin_manager
-            .dispatch_header_click(button_id, note, cursor);
+            .dispatch_header_click(button_id, note, cursor, &palette);
         self.apply_plugin_outcome(outcome);
     }
 
@@ -374,9 +497,10 @@ impl QuickyNotesApp {
         }
         let note = self.active_note();
         let cursor = self.last_cursor_range;
+        let palette = self.active_palette();
         let outcome = self
             .plugin_manager
-            .dispatch_shortcut(action_id, note, cursor);
+            .dispatch_shortcut(action_id, note, cursor, &palette);
         self.apply_plugin_outcome(outcome);
     }
 
@@ -387,9 +511,10 @@ impl QuickyNotesApp {
         }
         let note = self.active_note();
         let cursor = self.last_cursor_range;
+        let palette = self.active_palette();
         let outcome = self
             .plugin_manager
-            .dispatch_context_menu(action_id, note, cursor);
+            .dispatch_context_menu(action_id, note, cursor, &palette);
         self.apply_plugin_outcome(outcome);
     }
 
@@ -554,7 +679,8 @@ impl QuickyNotesApp {
         if self.data.settings.plugins.enabled {
             let note = self.active_note();
             let cursor = self.last_cursor_range;
-            let outcome = self.plugin_manager.dispatch_on_save(note, cursor);
+            let palette = self.active_palette();
+            let outcome = self.plugin_manager.dispatch_on_save(note, cursor, &palette);
             self.apply_plugin_outcome(outcome);
         }
     }
@@ -653,6 +779,9 @@ impl QuickyNotesApp {
         ui::drag_drop::poll_folder_dialog(self);
         ui::drag_drop::poll_export_dialog(self);
         ui::drag_drop::poll_settings_dialogs(self, ctx);
+
+        // Poll plugin timers
+        self.poll_plugin_timers();
 
         ui::drag_drop::handle_dropped_files(self, ctx);
         ui::shortcuts::handle_keyboard_shortcuts(self, ctx);
@@ -776,6 +905,9 @@ mod tests {
             folder_dialog_rx: None,
             last_disk_sync: Instant::now(),
             plugin_manager: crate::plugins::PluginManager::new(),
+            active_plugin_panel: None,
+            plugin_timer_last_fired: std::collections::HashMap::new(),
+            custom_accent_override: None,
         }
     }
 

@@ -88,6 +88,17 @@ pub struct PaletteColors {
     pub success: Color32,
 }
 
+impl Default for PaletteColors {
+    fn default() -> Self {
+        Self::new(
+            Color32::from_rgb(18, 12, 28),
+            Color32::from_rgb(28, 20, 42),
+            Color32::from_rgb(90, 50, 130),
+            ACCENT_PURPLE,
+        )
+    }
+}
+
 impl PaletteColors {
     /// Creates a palette from core theme colors with harmonious semantic defaults.
     pub fn new(bg: Color32, card: Color32, border: Color32, accent: Color32) -> Self {

@@ -15,7 +15,7 @@ pub fn note_matches_query(title: &str, content: &str, query: &str) -> bool {
 
 /// Renders the inline glass Search & Browse notes drawer.
 pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
-    let palette = theme::get_palette(&app.data.settings);
+    let palette = app.active_palette();
 
     ui.vertical(|ui| {
         ui.add_space(4.0);

@@ -1,6 +1,8 @@
 //! Rhai Scripting Engine container and sandboxed execution coordinator.
 
-use crate::plugins::api::{self, NoteHandle, PluginBuilder, SystemHandle, UiHandle};
+use crate::plugins::api::{
+    self, HttpHandle, NoteHandle, PluginBuilder, StorageHandle, SystemHandle, ThemeHandle, UiHandle,
+};
 use rhai::{AST, Engine, Scope};
 
 /// Maximum allowed evaluation steps per script execution to guarantee non-hanging behavior.
@@ -33,6 +35,7 @@ impl PluginEngine {
         // Enforce strict security and resource limits
         engine.set_max_operations(MAX_SCRIPT_OPERATIONS);
         engine.set_max_call_levels(MAX_SCRIPT_CALL_LEVELS);
+        engine.set_max_expr_depths(64, 64);
         engine.set_max_string_size(MAX_SCRIPT_STRING_SIZE);
         engine.set_max_array_size(MAX_SCRIPT_ARRAY_SIZE);
         engine.set_max_map_size(MAX_SCRIPT_MAP_SIZE);
@@ -71,7 +74,8 @@ impl PluginEngine {
         Ok(builder)
     }
 
-    /// Dispatches a hook function with standard `(note, ui, system)` context arguments and scope bindings.
+    /// Dispatches a hook function with standard `(note, ui, system, storage, http, theme)` context arguments and scope bindings.
+    #[allow(clippy::too_many_arguments)]
     pub fn call_event_hook(
         &self,
         ast: &AST,
@@ -80,8 +84,10 @@ impl PluginEngine {
         note_handle: &mut NoteHandle,
         ui_handle: &mut UiHandle,
         system_handle: &mut SystemHandle,
+        storage_handle: &mut StorageHandle,
+        http_handle: &mut HttpHandle,
+        theme_handle: &mut ThemeHandle,
     ) -> Result<(), String> {
-        // Check function existence and parameter count in AST
         let fn_match = ast.iter_functions().find(|f| f.name == function_name);
 
         let Some(fn_def) = fn_match else {
@@ -92,6 +98,9 @@ impl PluginEngine {
         scope.push("note", note_handle.clone());
         scope.push("ui", ui_handle.clone());
         scope.push("system", system_handle.clone());
+        scope.push("storage", storage_handle.clone());
+        scope.push("http", http_handle.clone());
+        scope.push("theme", theme_handle.clone());
 
         match (fn_def.params.len(), arg) {
             (0, _) => {
@@ -123,7 +132,29 @@ impl PluginEngine {
                     )
                     .map_err(|e| format!("Error in {function_name}(): {e}"))?;
             }
-            (3, _) => {
+            (2, None) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (note_handle.clone(), ui_handle.clone()),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (3, Some(arg_str)) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (arg_str.to_string(), note_handle.clone(), ui_handle.clone()),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (3, None) => {
                 let _: rhai::Dynamic = self
                     .engine
                     .call_fn(
@@ -154,7 +185,117 @@ impl PluginEngine {
                     )
                     .map_err(|e| format!("Error in {function_name}(): {e}"))?;
             }
-            _ => {}
+            (4, None) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (
+                            note_handle.clone(),
+                            ui_handle.clone(),
+                            system_handle.clone(),
+                            storage_handle.clone(),
+                        ),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (5, Some(arg_str)) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (
+                            arg_str.to_string(),
+                            note_handle.clone(),
+                            ui_handle.clone(),
+                            system_handle.clone(),
+                            storage_handle.clone(),
+                        ),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (5, None) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (
+                            note_handle.clone(),
+                            ui_handle.clone(),
+                            system_handle.clone(),
+                            storage_handle.clone(),
+                            http_handle.clone(),
+                        ),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (6, Some(arg_str)) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (
+                            arg_str.to_string(),
+                            note_handle.clone(),
+                            ui_handle.clone(),
+                            system_handle.clone(),
+                            storage_handle.clone(),
+                            http_handle.clone(),
+                        ),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (6, None) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (
+                            note_handle.clone(),
+                            ui_handle.clone(),
+                            system_handle.clone(),
+                            storage_handle.clone(),
+                            http_handle.clone(),
+                            theme_handle.clone(),
+                        ),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            (7, Some(arg_str)) => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(
+                        &mut scope,
+                        ast,
+                        function_name,
+                        (
+                            arg_str.to_string(),
+                            note_handle.clone(),
+                            ui_handle.clone(),
+                            system_handle.clone(),
+                            storage_handle.clone(),
+                            http_handle.clone(),
+                            theme_handle.clone(),
+                        ),
+                    )
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
+            _ => {
+                let _: rhai::Dynamic = self
+                    .engine
+                    .call_fn(&mut scope, ast, function_name, ())
+                    .map_err(|e| format!("Error in {function_name}(): {e}"))?;
+            }
         }
 
         Ok(())

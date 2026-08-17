@@ -7,12 +7,15 @@ pub mod types;
 
 pub use engine::PluginEngine;
 pub use types::{
-    HeaderButtonPosition, NoteMutation, PluginActionOutcome, PluginHeaderButton, PluginMenuItem,
-    PluginMetadata, PluginShortcut,
+    HeaderButtonPosition, NoteMutation, PanelAction, PluginActionOutcome, PluginHeaderButton,
+    PluginMenuItem, PluginMetadata, PluginShortcut, PluginTimer, ThemeMutation,
 };
 
 use crate::note::Note;
-use crate::plugins::api::{NoteHandle, SystemHandle, UiHandle};
+use crate::plugins::api::{
+    HttpHandle, NoteHandle, StorageHandle, SystemHandle, ThemeHandle, UiHandle,
+};
+use crate::theme::Palette;
 use directories::ProjectDirs;
 use rhai::AST;
 use std::fs;
@@ -31,6 +34,8 @@ pub struct PluginInstance {
     pub shortcuts: Vec<PluginShortcut>,
     /// Context menu items registered during `init()`.
     pub menu_items: Vec<PluginMenuItem>,
+    /// Periodic timers registered during `init()`.
+    pub timers: Vec<PluginTimer>,
 }
 
 /// Central manager orchestrating plugin discovery, compilation, and event dispatch.
@@ -92,19 +97,37 @@ impl PluginManager {
             let _ = fs::write(&term_path, templates::QUICK_TERMINAL_TEMPLATE);
         }
 
-        let table_path = self.plugins_dir.join("markdown_table_formatter.rhai");
-        if !table_path.exists() {
-            let _ = fs::write(&table_path, templates::MARKDOWN_TABLE_FORMATTER_TEMPLATE);
+        let pomo_path = self.plugins_dir.join("pomodoro_timer.rhai");
+        if !pomo_path.exists() {
+            let _ = fs::write(&pomo_path, templates::POMODORO_TIMER_TEMPLATE);
+        }
+
+        let quote_path = self.plugins_dir.join("quote_of_the_day.rhai");
+        if !quote_path.exists() {
+            let _ = fs::write(&quote_path, templates::QUOTE_OF_THE_DAY_TEMPLATE);
+        }
+
+        let theme_path = self.plugins_dir.join("custom_theme_cycler.rhai");
+        if !theme_path.exists() {
+            let _ = fs::write(&theme_path, templates::CUSTOM_THEME_CYCLER_TEMPLATE);
         }
     }
 
     /// Forcefully recreates the built-in starter templates.
     pub fn create_starter_templates(&mut self) {
+        let _ = fs::create_dir_all(&self.plugins_dir);
+
         let term_path = self.plugins_dir.join("quick_terminal.rhai");
         let _ = fs::write(&term_path, templates::QUICK_TERMINAL_TEMPLATE);
 
-        let table_path = self.plugins_dir.join("markdown_table_formatter.rhai");
-        let _ = fs::write(&table_path, templates::MARKDOWN_TABLE_FORMATTER_TEMPLATE);
+        let pomo_path = self.plugins_dir.join("pomodoro_timer.rhai");
+        let _ = fs::write(&pomo_path, templates::POMODORO_TIMER_TEMPLATE);
+
+        let quote_path = self.plugins_dir.join("quote_of_the_day.rhai");
+        let _ = fs::write(&quote_path, templates::QUOTE_OF_THE_DAY_TEMPLATE);
+
+        let theme_path = self.plugins_dir.join("custom_theme_cycler.rhai");
+        let _ = fs::write(&theme_path, templates::CUSTOM_THEME_CYCLER_TEMPLATE);
     }
 
     /// Scans the plugins directory and compiles all discovered `.rhai` scripts.
@@ -214,6 +237,7 @@ impl PluginManager {
             header_buttons: builder.header_buttons(),
             shortcuts: builder.shortcuts(),
             menu_items: builder.menu_items(),
+            timers: builder.timers(),
         });
     }
 
@@ -249,14 +273,33 @@ impl PluginManager {
             .collect()
     }
 
+    /// Returns all registered timers alongside their parent plugin ID.
+    pub fn all_timers(&self) -> Vec<(&str, &PluginTimer)> {
+        self.plugins
+            .iter()
+            .filter(|p| p.metadata.enabled)
+            .flat_map(|p| {
+                let pid = p.metadata.id.as_str();
+                p.timers.iter().map(move |t| (pid, t))
+            })
+            .collect()
+    }
+
     /// Dispatches a header button click event to active plugins.
     pub fn dispatch_header_click(
         &self,
         button_id: &str,
         note: Option<&Note>,
         cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
     ) -> PluginActionOutcome {
-        self.dispatch_event("on_header_click", Some(button_id), note, cursor_range)
+        self.dispatch_event(
+            "on_header_click",
+            Some(button_id),
+            note,
+            cursor_range,
+            palette,
+        )
     }
 
     /// Dispatches a global keyboard shortcut event to active plugins.
@@ -265,8 +308,9 @@ impl PluginManager {
         action_id: &str,
         note: Option<&Note>,
         cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
     ) -> PluginActionOutcome {
-        self.dispatch_event("on_shortcut", Some(action_id), note, cursor_range)
+        self.dispatch_event("on_shortcut", Some(action_id), note, cursor_range, palette)
     }
 
     /// Dispatches an editor context menu selection event to active plugins.
@@ -275,8 +319,76 @@ impl PluginManager {
         action_id: &str,
         note: Option<&Note>,
         cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
     ) -> PluginActionOutcome {
-        self.dispatch_event("on_context_menu_click", Some(action_id), note, cursor_range)
+        self.dispatch_event(
+            "on_context_menu_click",
+            Some(action_id),
+            note,
+            cursor_range,
+            palette,
+        )
+    }
+
+    /// Dispatches a timer tick event for a specific plugin.
+    pub fn dispatch_timer(
+        &self,
+        plugin_id: &str,
+        timer_id: &str,
+        note: Option<&Note>,
+        cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
+    ) -> PluginActionOutcome {
+        let mut outcome = PluginActionOutcome::new();
+        let plugin = match self
+            .plugins
+            .iter()
+            .find(|p| p.metadata.id == plugin_id && p.metadata.enabled)
+        {
+            Some(p) => p,
+            None => return outcome,
+        };
+
+        let mut note_handle = if let Some(n) = note {
+            NoteHandle::from_note(n, cursor_range)
+        } else {
+            NoteHandle::default()
+        };
+
+        let mut ui_handle = UiHandle::new();
+        let mut system_handle = SystemHandle::new();
+        let mut storage_handle = StorageHandle::new(plugin_id);
+        let mut http_handle = HttpHandle::new();
+        let mut theme_handle = ThemeHandle::from_palette(palette);
+
+        let res = self.engine.call_event_hook(
+            &plugin.ast,
+            "on_timer",
+            Some(timer_id),
+            &mut note_handle,
+            &mut ui_handle,
+            &mut system_handle,
+            &mut storage_handle,
+            &mut http_handle,
+            &mut theme_handle,
+        );
+
+        if let Err(err) = res {
+            outcome.toasts.push((
+                format!("{}: {err}", plugin.metadata.name),
+                crate::app::ToastKind::Error,
+            ));
+        }
+
+        outcome.mutations = note_handle.take_mutations();
+        outcome.toasts.extend(ui_handle.take_toasts());
+        outcome.status_msg = ui_handle.take_status_msg();
+        outcome.copy_to_clipboard = ui_handle.take_copy_clipboard();
+        outcome.panel_actions = ui_handle.take_panel_actions();
+        outcome.theme_mutations = theme_handle.take_mutations();
+        outcome.request_repaint = ui_handle.is_repaint_requested();
+
+        outcome
     }
 
     /// Dispatches the `on_save` hook event to active plugins.
@@ -284,8 +396,9 @@ impl PluginManager {
         &self,
         note: Option<&Note>,
         cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
     ) -> PluginActionOutcome {
-        self.dispatch_event("on_save", None, note, cursor_range)
+        self.dispatch_event("on_save", None, note, cursor_range, palette)
     }
 
     /// Dispatches the `on_note_change` hook event to active plugins.
@@ -293,8 +406,9 @@ impl PluginManager {
         &self,
         note: Option<&Note>,
         cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
     ) -> PluginActionOutcome {
-        self.dispatch_event("on_note_change", None, note, cursor_range)
+        self.dispatch_event("on_note_change", None, note, cursor_range, palette)
     }
 
     /// Generic internal dispatcher executing an event hook across all enabled plugin ASTs.
@@ -304,6 +418,7 @@ impl PluginManager {
         arg: Option<&str>,
         note: Option<&Note>,
         cursor_range: Option<(usize, usize)>,
+        palette: &Palette,
     ) -> PluginActionOutcome {
         let mut outcome = PluginActionOutcome::new();
         let mut note_handle = if let Some(n) = note {
@@ -314,8 +429,12 @@ impl PluginManager {
 
         let mut ui_handle = UiHandle::new();
         let mut system_handle = SystemHandle::new();
+        let mut theme_handle = ThemeHandle::from_palette(palette);
 
         for plugin in self.plugins.iter().filter(|p| p.metadata.enabled) {
+            let mut storage_handle = StorageHandle::new(&plugin.metadata.id);
+            let mut http_handle = HttpHandle::new();
+
             let res = self.engine.call_event_hook(
                 &plugin.ast,
                 hook_name,
@@ -323,6 +442,9 @@ impl PluginManager {
                 &mut note_handle,
                 &mut ui_handle,
                 &mut system_handle,
+                &mut storage_handle,
+                &mut http_handle,
+                &mut theme_handle,
             );
 
             if let Err(err) = res {
@@ -337,6 +459,8 @@ impl PluginManager {
         outcome.toasts.extend(ui_handle.take_toasts());
         outcome.status_msg = ui_handle.take_status_msg();
         outcome.copy_to_clipboard = ui_handle.take_copy_clipboard();
+        outcome.panel_actions = ui_handle.take_panel_actions();
+        outcome.theme_mutations = theme_handle.take_mutations();
         outcome.request_repaint = ui_handle.is_repaint_requested();
 
         outcome
@@ -358,7 +482,8 @@ mod tests {
                 plugin.description = "A test plugin";
                 plugin.add_header_button("btn1", "🚀", "Launch rocket", "right");
                 plugin.add_shortcut("rocket", "Ctrl+R");
-                plugin.add_context_menu_item("rocket", "Launch Rocket");
+                plugin.add_context_menu_item("ctx1", "Do Action");
+                plugin.add_timer("tick", 60);
                 return plugin;
             }
 
@@ -367,7 +492,6 @@ mod tests {
                     ui.toast_success("Rocket launched!");
                     note.insert_at_cursor("🚀");
                 }
-                return note;
             }
         "#;
 
@@ -377,19 +501,18 @@ mod tests {
         assert_eq!(builder.get_name(), "Test Plugin");
         assert_eq!(builder.get_author(), "Tester");
         assert_eq!(builder.get_version(), "2.0.0");
-        let header_buttons = builder.header_buttons();
-        assert_eq!(header_buttons.len(), 1);
-        assert_eq!(header_buttons[0].id, "btn1");
-        let shortcuts = builder.shortcuts();
-        assert_eq!(shortcuts.len(), 1);
-        assert_eq!(shortcuts[0].action_id, "rocket");
-        let menu_items = builder.menu_items();
-        assert_eq!(menu_items.len(), 1);
+        assert_eq!(builder.header_buttons().len(), 1);
+        assert_eq!(builder.shortcuts().len(), 1);
+        assert_eq!(builder.menu_items().len(), 1);
+        assert_eq!(builder.timers().len(), 1);
 
-        // Test event hook call
         let mut note_handle = NoteHandle::default();
         let mut ui_handle = UiHandle::new();
         let mut system_handle = SystemHandle::new();
+        let mut storage_handle = StorageHandle::new("test");
+        let mut http_handle = HttpHandle::new();
+        let palette = Palette::default();
+        let mut theme_handle = ThemeHandle::from_palette(&palette);
 
         engine
             .call_event_hook(
@@ -399,6 +522,9 @@ mod tests {
                 &mut note_handle,
                 &mut ui_handle,
                 &mut system_handle,
+                &mut storage_handle,
+                &mut http_handle,
+                &mut theme_handle,
             )
             .expect("Event hook should execute");
 
@@ -427,6 +553,10 @@ mod tests {
         let mut note_handle = NoteHandle::default();
         let mut ui_handle = UiHandle::new();
         let mut system_handle = SystemHandle::new();
+        let mut storage_handle = StorageHandle::new("test");
+        let mut http_handle = HttpHandle::new();
+        let palette = Palette::default();
+        let mut theme_handle = ThemeHandle::from_palette(&palette);
 
         let result = engine.call_event_hook(
             &ast,
@@ -435,6 +565,9 @@ mod tests {
             &mut note_handle,
             &mut ui_handle,
             &mut system_handle,
+            &mut storage_handle,
+            &mut http_handle,
+            &mut theme_handle,
         );
 
         assert!(result.is_err());
@@ -461,6 +594,10 @@ mod tests {
         let mut note_handle = NoteHandle::from_note(&note, None);
         let mut ui_handle = UiHandle::new();
         let mut system_handle = SystemHandle::new();
+        let mut storage_handle = StorageHandle::new("test");
+        let mut http_handle = HttpHandle::new();
+        let palette = Palette::default();
+        let mut theme_handle = ThemeHandle::from_palette(&palette);
 
         engine
             .call_event_hook(
@@ -470,6 +607,9 @@ mod tests {
                 &mut note_handle,
                 &mut ui_handle,
                 &mut system_handle,
+                &mut storage_handle,
+                &mut http_handle,
+                &mut theme_handle,
             )
             .expect("Should succeed");
 
@@ -490,5 +630,76 @@ mod tests {
             ui_handle.take_copy_clipboard(),
             Some("Copied Text".to_string())
         );
+    }
+
+    #[test]
+    fn test_plugin_storage_and_theme_apis() {
+        let mut storage = StorageHandle::new("unit_test_storage");
+        storage.clear();
+        assert!(!storage.has("key1".to_string()));
+
+        storage.set("key1".to_string(), "val1".to_string());
+        assert_eq!(storage.get("key1".to_string()), "val1");
+        assert!(storage.has("key1".to_string()));
+
+        let keys = storage.keys();
+        assert_eq!(keys.len(), 1);
+
+        storage.delete("key1".to_string());
+        assert!(!storage.has("key1".to_string()));
+
+        let palette = Palette::default();
+        let mut theme = ThemeHandle::from_palette(&palette);
+        assert!(!theme.get_accent().is_empty());
+        theme.set_accent("#FF00FF".to_string());
+        assert_eq!(
+            theme.take_mutations(),
+            vec![ThemeMutation::SetAccent("#FF00FF".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_plugin_json_utilities_and_hook_dispatch() {
+        let engine = PluginEngine::new();
+        let script = r#"
+        fn on_header_click(btn_id, note, ui, system, storage, http, theme) {
+            storage.set("clicked", btn_id);
+            let json_raw = "{\"status\": \"ok\", \"count\": 42}";
+            let parsed = parse_json(json_raw);
+            if parsed.contains("count") {
+                let cnt = parsed["count"];
+                ui.toast_success("Count: " + cnt);
+            }
+        }
+        "#;
+        let ast = engine.compile_script(script).expect("Should compile");
+
+        let note = Note::new("Test".to_string(), "".to_string());
+        let mut note_handle = NoteHandle::from_note(&note, None);
+        let mut ui = UiHandle::new();
+        let mut system = SystemHandle::new();
+        let mut storage = StorageHandle::new("test_json_storage");
+        let mut http = HttpHandle::new();
+        let palette = Palette::default();
+        let mut theme = ThemeHandle::from_palette(&palette);
+
+        engine
+            .call_event_hook(
+                &ast,
+                "on_header_click",
+                Some("test_btn"),
+                &mut note_handle,
+                &mut ui,
+                &mut system,
+                &mut storage,
+                &mut http,
+                &mut theme,
+            )
+            .expect("Should execute successfully");
+
+        assert_eq!(storage.get("clicked".to_string()), "test_btn");
+        let toasts = ui.take_toasts();
+        assert_eq!(toasts.len(), 1);
+        assert_eq!(toasts[0].0, "Count: 42");
     }
 }

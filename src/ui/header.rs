@@ -34,7 +34,7 @@ pub const MIN_TABS_SCROLL_WIDTH: f32 = 40.0;
 
 /// Renders the top header bar containing open note tabs on the left and grouped action buttons on the right.
 pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
-    let palette = theme::get_palette(&app.data.settings);
+    let palette = app.active_palette();
 
     // Solid outer header container bar
     card::glass_header_frame(&app.data.settings).show(ui, |ui| {

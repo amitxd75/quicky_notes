@@ -7,7 +7,7 @@ use crate::ai::{self, AiAction, AiRequest, AiResult, AiSettings};
 use crate::app::QuickyNotesApp;
 use crate::components::button;
 use crate::components::card;
-use crate::theme::{self, Palette};
+use crate::theme::Palette;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Key, Margin, RichText, Sense, Stroke, Ui};
 use std::sync::mpsc;
 
@@ -194,7 +194,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
         return;
     }
 
-    let palette = theme::get_palette(&app.data.settings);
+    let palette = app.active_palette();
     let mut accept_triggered = false;
     let mut discard_triggered = false;
     let mut copy_triggered = false;

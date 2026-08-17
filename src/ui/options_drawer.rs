@@ -48,7 +48,7 @@ impl SettingsTab {
 
 /// Renders the Settings & Preferences drawer matching image.png.
 pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
-    let palette = theme::get_palette(&app.data.settings);
+    let palette = app.active_palette();
 
     ui.vertical(|ui| {
         ui.add_space(2.0);

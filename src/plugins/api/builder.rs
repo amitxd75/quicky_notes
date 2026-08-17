@@ -15,6 +15,7 @@ pub struct PluginBuilderInner {
     pub header_buttons: Vec<PluginHeaderButton>,
     pub shortcuts: Vec<PluginShortcut>,
     pub menu_items: Vec<PluginMenuItem>,
+    pub timers: Vec<crate::plugins::types::PluginTimer>,
 }
 
 /// Builder object passed to the `init(plugin)` entrypoint in Rhai scripts.
@@ -187,6 +188,21 @@ impl PluginBuilder {
         }
     }
 
+    /// Registers a periodic background timer in seconds.
+    pub fn add_timer(&mut self, id: String, interval_seconds: i64) {
+        let id = id.trim().to_string();
+        if id.is_empty() || interval_seconds <= 0 {
+            return;
+        }
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.timers.retain(|t| t.id != id);
+            inner.timers.push(crate::plugins::types::PluginTimer {
+                id,
+                interval_seconds: interval_seconds.max(1) as u64,
+            });
+        }
+    }
+
     /// Converts builder into a populated `PluginMetadata` instance.
     pub fn to_metadata(&self, id: String, file_path: Option<String>) -> PluginMetadata {
         let inner = self.inner.lock().unwrap();
@@ -234,6 +250,14 @@ impl PluginBuilder {
         self.inner
             .lock()
             .map(|i| i.menu_items.clone())
+            .unwrap_or_default()
+    }
+
+    /// Clones registered background timers.
+    pub fn timers(&self) -> Vec<crate::plugins::types::PluginTimer> {
+        self.inner
+            .lock()
+            .map(|i| i.timers.clone())
             .unwrap_or_default()
     }
 }

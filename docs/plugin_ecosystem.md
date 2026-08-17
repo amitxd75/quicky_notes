@@ -1,6 +1,6 @@
 # Quicky Notes Plugin Ecosystem & Developer Guide
 
-Quicky Notes features a pure-Rust, embedded **Rhai Scripting Plugin Engine**. Plugins allow you to customize and extend Quicky Notes with custom header buttons, global hotkeys, right-click context menu tools, note buffer transformations, clipboard automations, terminal launchers, and system integrations.
+Quicky Notes features a powerful, embedded **Rhai Scripting Plugin Engine**. Plugins allow you to customize and extend Quicky Notes with custom header buttons, global hotkeys, right-click context menu tools, note buffer transformations, clipboard automations, persistent storage, pure-Rust HTTP REST requests, recurring timers, dynamic theme color overrides, collapsible bottom console panels, and native terminal launchers.
 
 ---
 
@@ -10,16 +10,19 @@ Quicky Notes features a pure-Rust, embedded **Rhai Scripting Plugin Engine**. Pl
 2. [Managing Plugins in Settings](#2-managing-plugins-in-settings)
 3. [Plugin Architecture & Lifecycle Hooks](#3-plugin-architecture--lifecycle-hooks)
 4. [Host API Reference](#4-host-api-reference)
+   - [Registration API (`plugin`)](#registration-api-plugin)
    - [Note API (`note`)](#note-api-note)
-   - [UI API (`ui`)](#ui-api-ui)
+   - [UI & Bottom Panel API (`ui`)](#ui--bottom-panel-api-ui)
+   - [Persistent Key-Value Storage API (`storage`)](#persistent-key-value-storage-api-storage)
+   - [HTTP REST Client API (`http`)](#http-rest-client-api-http)
+   - [Theme & Accent API (`theme`)](#theme--accent-api-theme)
    - [System API (`system`)](#system-api-system)
 5. [Complete Practical Examples](#5-complete-practical-examples)
-   - [Example 1: Quick Terminal Launcher](#example-1-quick-terminal-launcher)
-   - [Example 2: Markdown Table Formatter](#example-2-markdown-table-formatter)
-   - [Example 3: Timestamp & Date Inserter](#example-3-timestamp--date-inserter)
-   - [Example 4: Text Case Transformer (Upper / Lower / Title)](#example-4-text-case-transformer)
-   - [Example 5: External Shell Formatter (Prettier / Black / shfmt)](#example-5-external-shell-formatter)
-6. [Security & Sandboxing](#6-security--sandboxing)
+   - [Example 1: Pomodoro Focus Timer with Interval Ticks & Console Drawer](#example-1-pomodoro-focus-timer)
+   - [Example 2: Quote of the Day HTTP REST Fetcher](#example-2-quote-of-the-day-http-rest-fetcher)
+   - [Example 3: Dynamic Theme Accent Cycler](#example-3-dynamic-theme-accent-cycler)
+   - [Example 4: Quick Terminal Launcher](#example-4-quick-terminal-launcher)
+6. [Security & Sandboxing Quotas](#6-security--sandboxing-quotas)
 
 ---
 
@@ -27,7 +30,7 @@ Quicky Notes features a pure-Rust, embedded **Rhai Scripting Plugin Engine**. Pl
 
 ### Plugin Directory Location
 
-All plugins are stored in the user config directory:
+All user plugin scripts reside in your standard config folder:
 
 ```text
 ~/.config/quicky_notes/plugins/
@@ -36,74 +39,78 @@ All plugins are stored in the user config directory:
 ### Installing a Plugin
 
 To install any plugin:
-1. Save your script file with a `.rhai` extension (e.g. `my_plugin.rhai`) directly inside `~/.config/quicky_notes/plugins/`.
-2. Or create a subdirectory with `plugin.rhai` or `main.rhai`:
+1. Save your script file with a `.rhai` extension (e.g. `pomodoro_timer.rhai`) directly inside `~/.config/quicky_notes/plugins/`.
+2. Or create a subdirectory containing `plugin.rhai` or `main.rhai`:
    ```text
    ~/.config/quicky_notes/plugins/
+   ├── pomodoro_timer.rhai
+   ├── quote_of_the_day.rhai
    ├── quick_terminal.rhai
-   ├── markdown_table_formatter.rhai
-   └── git_helper/
+   └── my_custom_tool/
        └── plugin.rhai
    ```
-3. Open Quicky Notes (or click **🔄 Reload** in Settings) — your plugin is instantly compiled and active!
+3. Open Quicky Notes (or click **🔄 Reload** in Settings) — your plugin is compiled and active immediately!
 
 ---
 
 ## 2. Managing Plugins in Settings
 
-Open **Settings & Preferences** by pressing <kbd>Ctrl</kbd> + <kbd>,</kbd> and navigate to the **`🧩 Plugins`** tab:
+Open **Settings & Preferences** by clicking the gear icon or pressing <kbd>Ctrl</kbd> + <kbd>,</kbd>, then switch to the **`🔌 Plugins`** tab:
 
 - **Master Toggle (`Enable Rhai Plugin System`)**: Enables or disables the entire plugin runtime.
 - **📁 Open Folder**: Opens `~/.config/quicky_notes/plugins/` in your desktop file manager.
-- **🔄 Reload**: Re-scans the directory and hot-reloads all scripts in memory without restarting the application.
-- **✨ Starter Plugins**: Regenerates official starter templates (`quick_terminal.rhai` and `markdown_table_formatter.rhai`).
+- **🔄 Reload**: Re-scans the directory and hot-reloads all scripts in memory without restarting.
+- **✨ Starter Plugins**: Generates official starter templates.
 - **Plugin Cards**:
   - Enable or disable individual plugins with dedicated toggle switches.
-  - View author, version, and capability badges (registered header buttons, key combinations, and context menu items).
+  - View author, version, and capability badges (registered buttons, shortcuts, timers, and context menu items).
   - Inspect compilation warnings and runtime error diagnostics.
 
 ---
 
 ## 3. Plugin Architecture & Lifecycle Hooks
 
-Plugins are written in [Rhai](https://rhai.rs/), a safe, memory-bounded, pure-Rust scripting language.
+Plugins are written in [Rhai](https://rhai.rs/), an embedded scripting language designed specifically for Rust.
 
 ### Lifecycle Hooks
 
-Every plugin can implement any subset of the following entrypoints:
+Every plugin can implement any combination of the following entrypoints:
 
 | Hook | Parameters | Description |
 | :--- | :--- | :--- |
-| `init(plugin)` | `plugin` | Registration entrypoint called once on load to configure metadata, header buttons, shortcuts, and context menu entries. |
+| `init(plugin)` | `plugin` | Registration entrypoint called once on load to configure metadata, header buttons, shortcuts, timers, and context menu entries. |
 | `on_header_click(button_id, note, ui, system)` | `button_id, note, ui, system` | Triggered when the user clicks a custom header bar icon registered by this plugin. |
 | `on_shortcut(action_id, note, ui, system)` | `action_id, note, ui, system` | Triggered when a registered keyboard shortcut combination is pressed. |
 | `on_context_menu_click(action_id, note, ui, system)` | `action_id, note, ui, system` | Triggered when a custom right-click context menu item is selected in the editor. |
+| `on_timer(timer_id, note, ui, system)` | `timer_id, note, ui, system` | Triggered periodically when a background timer interval elapses. |
 | `on_save(note, ui, system)` | `note, ui, system` | Triggered whenever the active note is saved to disk or SQLite. |
 | `on_note_change(note, ui, system)` | `note, ui, system` | Triggered whenever note text is modified. |
+
+> [!NOTE]
+> All hook functions have global access to `storage`, `http`, `theme`, `note`, `ui`, and `system` inside their scope.
 
 ---
 
 ## 4. Host API Reference
 
-### Plugin Registration API (`plugin` inside `init`)
+### Registration API (`plugin` inside `init`)
 
 | Method / Property | Description |
 | :--- | :--- |
 | `plugin.name = "My Plugin"` | Sets the display name of the plugin. |
 | `plugin.author = "Your Name"` | Sets the author string. |
-| `plugin.version = "1.0.0"` | Sets the semantic version. |
+| `plugin.version = "1.0.0"` | Sets the semantic version string. |
 | `plugin.description = "..."` | Sets a description shown in the Plugin Manager. |
 | `plugin.add_header_button(id, icon, tooltip, position)` | Registers a header icon button. `position` can be `"right"` or `"left"`. |
 | `plugin.add_shortcut(action_id, key_comb)` | Registers a global hotkey (e.g. `"Ctrl+Shift+T"`, `"Ctrl+\``", `"Alt+F12"`). |
 | `plugin.add_shortcut_with_label(action_id, key_comb, label)` | Registers a shortcut with a custom display label in Settings. |
 | `plugin.add_context_menu_item(action_id, label)` | Registers an item in the right-click editor context menu. |
 | `plugin.add_context_menu_item_with_icon(action_id, label, icon)` | Registers an item in the right-click menu with an icon prefix (e.g. `">_"`, `"▦"`). |
+| `plugin.add_timer(timer_id, interval_seconds)` | Registers a recurring background timer in seconds (e.g. `plugin.add_timer("tick", 1)`). |
 
 ---
 
 ### Note API (`note`)
-
-The `note` object provides live access and mutations to the currently focused note buffer:
 
 | Method | Return Type | Description |
 | :--- | :--- | :--- |
@@ -122,9 +129,7 @@ The `note` object provides live access and mutations to the currently focused no
 
 ---
 
-### UI API (`ui`)
-
-The `ui` object allows displaying visual feedback and interacting with system clipboard:
+### UI & Bottom Panel API (`ui`)
 
 | Method | Description |
 | :--- | :--- |
@@ -135,18 +140,64 @@ The `ui` object allows displaying visual feedback and interacting with system cl
 | `ui.set_status(message)` | Updates the bottom status bar message. |
 | `ui.copy_to_clipboard(text)` | Writes text to the system clipboard. |
 | `ui.get_clipboard()` | Reads the current text from the system clipboard. |
+| `ui.show_panel(title, content)` | Opens the bottom output console drawer with the given title and text. |
+| `ui.append_panel(text)` | Appends text to the active bottom output console drawer. |
+| `ui.set_panel_content(content)` | Replaces the content in the active bottom console drawer. |
+| `ui.clear_panel()` | Clears the active bottom console drawer. |
+| `ui.hide_panel()` | Closes and hides the bottom console drawer. |
 | `ui.request_repaint()` | Forces an immediate egui frame redraw. |
+
+---
+
+### Persistent Key-Value Storage API (`storage`)
+
+Each plugin gets its own isolated JSON data store saved automatically under `~/.config/quicky_notes/plugins_data/<plugin_id>.json`:
+
+| Method | Return Type | Description |
+| :--- | :--- | :--- |
+| `storage.get(key)` | `String` | Gets a value by key (or empty string if not found). |
+| `storage.set(key, value)` | `()` | Sets a key-value pair and persists immediately to disk. |
+| `storage.has(key)` | `bool` | Checks if a key exists in storage. |
+| `storage.delete(key)` | `bool` | Deletes a key from storage. Returns `true` if the key was present. |
+| `storage.clear()` | `()` | Clears all stored data for this plugin. |
+| `storage.keys()` | `Array` | Returns an array of all keys stored for this plugin. |
+| `storage.all()` | `Map` | Returns a key-value dictionary of all stored data. |
+
+---
+
+### HTTP REST Client API (`http`)
+
+Pure-Rust synchronous and background-ready HTTP client with 10s timeouts and a 5 MB response cap:
+
+| Method | Return Type | Description |
+| :--- | :--- | :--- |
+| `http.get(url)` | `String` | Performs an HTTP GET request and returns the response body. |
+| `http.get_with_headers(url, headers_map)` | `String` | Performs an HTTP GET request with custom headers dictionary. |
+| `http.post(url, body)` | `String` | Performs an HTTP POST request with a raw text/JSON body. |
+| `http.post_json(url, body, headers_map)` | `String` | Performs an HTTP POST request with custom headers. |
+| `http.status_code()` | `i64` | Returns the HTTP status code of the last request (e.g. `200`, `404`). |
+| `http.last_error()` | `String` | Returns the last HTTP error message, if any. |
+
+---
+
+### Theme & Accent API (`theme`)
+
+| Method | Return Type | Description |
+| :--- | :--- | :--- |
+| `theme.get_accent()` | `String` | Returns the current accent color as a HEX string (e.g. `"#7AA2F7"`). |
+| `theme.get_bg()` | `String` | Returns the current background color as a HEX string. |
+| `theme.set_accent(hex_color)` | `()` | Dynamically sets a temporary accent color override (e.g. `"#00F0FF"`). |
+| `theme.reset_accent()` | `()` | Resets the accent color back to the active theme palette. |
+| `theme.is_dark()` | `bool` | Returns `true` if the active theme is a dark theme. |
 
 ---
 
 ### System API (`system`)
 
-The `system` object provides safe operating system, terminal, and execution utilities:
-
 | Method | Return Type | Description |
 | :--- | :--- | :--- |
 | `system.launch_terminal(dir)` | `bool` | Auto-detects installed modern terminal emulators (`$TERMINAL`, `kitty`, `alacritty`, `foot`, `ghostty`, `wezterm`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `xterm`) and spawns a window in `dir`. |
-| `system.exec(command, args)` | `bool` | Spawns a non-blocking background child process (e.g. `system.exec("git", ["pull"])`). |
+| `system.exec(command, args)` | `bool` | Spawns a non-blocking background child process (e.g. `system.exec("notify-send", ["Hi"])`). |
 | `system.exec_sync(command, args)` | `String` | Executes a command synchronously and returns captured stdout (capped at 1 MB). |
 | `system.open_folder(path)` | `()` | Safely opens the directory in the desktop default file manager (`xdg-open`). |
 | `system.open_url(url)` | `()` | Opens an `http://` or `https://` URL in the default web browser. |
@@ -157,7 +208,157 @@ The `system` object provides safe operating system, terminal, and execution util
 
 ## 5. Complete Practical Examples
 
-### Example 1: Quick Terminal Launcher
+### Example 1: Pomodoro Focus Timer
+
+File: `~/.config/quicky_notes/plugins/pomodoro_timer.rhai`
+
+```rhai
+fn init(plugin) {
+    plugin.name = "Pomodoro Timer";
+    plugin.author = "Community";
+    plugin.version = "1.0.0";
+    plugin.description = "25-minute focus intervals and 5-minute breaks with timers and console drawer";
+    
+    plugin.add_header_button("pomo_start", "🍅", "Toggle Pomodoro Timer", "right");
+    plugin.add_header_button("pomo_panel", "⏱️", "Toggle Pomodoro Output Panel", "right");
+    plugin.add_shortcut_with_label("pomo_toggle", "Ctrl+Alt+P", "Toggle Pomodoro Timer");
+    plugin.add_context_menu_item_with_icon("pomo_reset", "Reset Pomodoro Timer", "🔄");
+
+    // 1-second recurring background interval
+    plugin.add_timer("pomo_tick", 1);
+    return plugin;
+}
+
+fn on_header_click(button_id, note, ui, system) {
+    if button_id == "pomo_start" { toggle_timer(ui); }
+    else if button_id == "pomo_panel" { toggle_panel(ui); }
+}
+
+fn on_timer(timer_id, note, ui, system) {
+    if timer_id != "pomo_tick" || storage.get("running") != "true" { return; }
+    
+    let remaining = storage.get("remaining").to_int();
+    if remaining > 0 {
+        remaining -= 1;
+        storage.set("remaining", `${remaining}`);
+        let mode = storage.get("mode");
+        let mins = remaining / 60;
+        let secs = remaining % 60;
+        let sec_str = if secs < 10 { `0${secs}` } else { `${secs}` };
+        ui.set_status(`🍅 [${mode}]: ${mins}:${sec_str}`);
+        if storage.get("panel_open") == "true" {
+            ui.set_panel_content(`=== Pomodoro Status ===\nPhase: ${mode}\nTime Left: ${mins}:${sec_str}\nStatus: Active Focusing`);
+        }
+    } else {
+        let mode = storage.get("mode");
+        if mode == "Work" {
+            storage.set("mode", "Break");
+            storage.set("remaining", "300");
+            ui.toast_success("🎉 Work session completed! Take a 5-minute break.");
+            system.exec("notify-send", ["Pomodoro", "Work session done! 5m break."]);
+        } else {
+            storage.set("mode", "Work");
+            storage.set("remaining", "1500");
+            ui.toast_success("🔔 Break finished! Ready to focus?");
+            system.exec("notify-send", ["Pomodoro", "Break over! Back to work."]);
+        }
+    }
+}
+
+fn toggle_timer(ui) {
+    let is_running = storage.get("running") == "true";
+    if is_running {
+        storage.set("running", "false");
+        ui.toast_warning("⏸️ Pomodoro timer paused.");
+        ui.set_status("Pomodoro: Paused");
+    } else {
+        if !storage.has("mode") {
+            storage.set("mode", "Work");
+            storage.set("remaining", "1500");
+        }
+        storage.set("running", "true");
+        ui.toast_success("🍅 Pomodoro timer started (25m focus)!");
+    }
+}
+
+fn toggle_panel(ui) {
+    let is_open = storage.get("panel_open") == "true";
+    if is_open {
+        storage.set("panel_open", "false");
+        ui.hide_panel();
+    } else {
+        storage.set("panel_open", "true");
+        ui.show_panel("Pomodoro Focus Console", "=== Pomodoro Status ===\nPhase: Work\nTime Left: 25:00");
+    }
+}
+```
+
+---
+
+### Example 2: Quote of the Day HTTP REST Fetcher
+
+File: `~/.config/quicky_notes/plugins/quote_of_the_day.rhai`
+
+```rhai
+fn init(plugin) {
+    plugin.name = "Daily Wisdom Quotes";
+    plugin.author = "Community";
+    plugin.version = "1.0.0";
+    plugin.description = "Fetches programming wisdom over HTTP with console panel output";
+    
+    plugin.add_header_button("fetch_quote", "💡", "Fetch Daily Programming Quote", "right");
+    plugin.add_context_menu_item_with_icon("quote_insert", "Insert Programming Quote", "📝");
+    return plugin;
+}
+
+fn on_header_click(button_id, note, ui, system) {
+    if button_id == "fetch_quote" {
+        ui.toast("Fetching quote over HTTP...");
+        let body = http.get("https://dummyjson.com/quotes/random");
+        if http.status_code() == 200 && !body.is_empty() {
+            ui.show_panel("Daily Programming Wisdom", `💡 Developer Wisdom\n--------------------------------\n\n"${body}"`);
+            ui.copy_to_clipboard(body);
+            ui.toast_success("Quote loaded & copied!");
+        } else {
+            ui.toast_error("Failed to retrieve quote over HTTP.");
+        }
+    }
+}
+```
+
+---
+
+### Example 3: Dynamic Theme Accent Cycler
+
+File: `~/.config/quicky_notes/plugins/custom_theme_cycler.rhai`
+
+```rhai
+fn init(plugin) {
+    plugin.name = "Theme Accent Cycler";
+    plugin.author = "Community";
+    plugin.version = "1.0.0";
+    plugin.description = "Cycles UI accent highlights dynamically between Cyberpunk Cyan, Tokyo Purple, and Emerald";
+    
+    plugin.add_header_button("theme_cycle", "🎨", "Cycle Theme Accent Color", "left");
+    plugin.add_shortcut_with_label("theme_cycle_key", "Ctrl+Alt+T", "Cycle Accent Color");
+    return plugin;
+}
+
+fn on_header_click(button_id, note, ui, system) {
+    if button_id == "theme_cycle" {
+        let colors = ["#00F0FF", "#BB9AF7", "#2ECC71", "#FF007F", "#F59E0B"];
+        let idx = if storage.has("idx") { storage.get("idx").to_int() } else { 0 };
+        idx = (idx + 1) % colors.len();
+        storage.set("idx", `${idx}`);
+        theme.set_accent(colors[idx]);
+        ui.toast_success(`🎨 Accent color updated to ${colors[idx]}`);
+    }
+}
+```
+
+---
+
+### Example 4: Quick Terminal Launcher
 
 File: `~/.config/quicky_notes/plugins/quick_terminal.rhai`
 
@@ -166,31 +367,27 @@ fn init(plugin) {
     plugin.name = "Quick Terminal";
     plugin.author = "amitxd";
     plugin.version = "1.0.0";
-    plugin.description = "Launches terminal emulator in note directory with header icon and shortcut";
+    plugin.description = "Auto-detects and launches terminal emulator in note directory";
 
-    // 1. Add top header icon button
     plugin.add_header_button("btn_terminal", ">_", "Launch Terminal (Ctrl+`)", "right");
-
-    // 2. Add global keyboard shortcut
     plugin.add_shortcut("open_terminal", "Ctrl+`");
-
-    // 3. Add right-click context menu item
     plugin.add_context_menu_item_with_icon("open_terminal", "Open Terminal in Folder", ">_");
+    return plugin;
 }
 
-fn on_header_click(button_id, note, ui, system) {
+fn on_header_click(button_id, note, ui, system, storage, http, theme) {
     if button_id == "btn_terminal" {
         launch_term(note, ui, system);
     }
 }
 
-fn on_shortcut(action_id, note, ui, system) {
+fn on_shortcut(action_id, note, ui, system, storage, http, theme) {
     if action_id == "open_terminal" {
         launch_term(note, ui, system);
     }
 }
 
-fn on_context_menu_click(action_id, note, ui, system) {
+fn on_context_menu_click(action_id, note, ui, system, storage, http, theme) {
     if action_id == "open_terminal" {
         launch_term(note, ui, system);
     }
@@ -198,12 +395,7 @@ fn on_context_menu_click(action_id, note, ui, system) {
 
 fn launch_term(note, ui, system) {
     let fp = note.get_file_path();
-    let target_dir = if fp != "" {
-        system.parent_dir(fp)
-    } else {
-        system.home_dir()
-    };
-
+    let target_dir = if fp != "" { system.parent_dir(fp) } else { system.home_dir() };
     let launched = system.launch_terminal(target_dir);
     if launched {
         ui.toast_success("Terminal launched in " + target_dir);
@@ -215,202 +407,13 @@ fn launch_term(note, ui, system) {
 
 ---
 
-### Example 2: Markdown Table Formatter
+## 6. Security & Sandboxing Quotas
 
-File: `~/.config/quicky_notes/plugins/markdown_table_formatter.rhai`
+To guarantee smooth 60fps performance and total safety, the plugin runtime enforces strict hardware limits:
 
-```rhai
-fn init(plugin) {
-    plugin.name = "Table Formatter";
-    plugin.author = "amitxd";
-    plugin.version = "1.0.0";
-    plugin.description = "Aligns markdown table columns and delimiter rows";
-
-    plugin.add_context_menu_item_with_icon("format_table", "Format Markdown Table", "▦");
-}
-
-fn on_context_menu_click(action_id, note, ui, system) {
-    if action_id == "format_table" {
-        let text = note.get_selection();
-        let is_selection = true;
-        if text == "" {
-            text = note.get_text();
-            is_selection = false;
-        }
-
-        let lines = text.split("\n");
-        let formatted = "";
-        let is_first = true;
-
-        for line in lines {
-            let trimmed = line.trim();
-            if trimmed.starts_with("|") && trimmed.ends_with("|") {
-                let cells = trimmed.split("|");
-                let row_str = "|";
-                for cell in cells {
-                    let c = cell.trim();
-                    if c != "" {
-                        row_str = row_str + " " + c + " |";
-                    }
-                }
-                if !is_first { formatted = formatted + "\n"; }
-                formatted = formatted + row_str;
-            } else {
-                if !is_first { formatted = formatted + "\n"; }
-                formatted = formatted + line;
-            }
-            is_first = false;
-        }
-
-        if is_selection {
-            note.replace_selection(formatted);
-        } else {
-            note.set_text(formatted);
-        }
-        ui.toast_success("Table formatted ✓");
-    }
-}
-```
-
----
-
-### Example 3: Timestamp & Date Inserter
-
-File: `~/.config/quicky_notes/plugins/timestamp_inserter.rhai`
-
-```rhai
-fn init(plugin) {
-    plugin.name = "Timestamp Inserter";
-    plugin.author = "Community";
-    plugin.version = "1.0.0";
-    plugin.description = "Inserts current ISO timestamp at cursor position";
-
-    plugin.add_shortcut_with_label("insert_timestamp", "Ctrl+Shift+D", "Insert Timestamp");
-    plugin.add_context_menu_item_with_icon("insert_timestamp", "Insert Current Timestamp", "🕒");
-}
-
-fn on_shortcut(action_id, note, ui, system) {
-    if action_id == "insert_timestamp" {
-        insert_time(note, ui, system);
-    }
-}
-
-fn on_context_menu_click(action_id, note, ui, system) {
-    if action_id == "insert_timestamp" {
-        insert_time(note, ui, system);
-    }
-}
-
-fn insert_time(note, ui, system) {
-    let output = system.exec_sync("date", ["+%Y-%m-%d %H:%M:%S"]);
-    let trimmed = output.trim();
-    if trimmed != "" {
-        note.insert_at_cursor(trimmed);
-        ui.toast_success("Inserted timestamp ✓");
-    }
-}
-```
-
----
-
-### Example 4: Text Case Transformer
-
-File: `~/.config/quicky_notes/plugins/case_transformer.rhai`
-
-```rhai
-fn init(plugin) {
-    plugin.name = "Case Transformer";
-    plugin.author = "Community";
-    plugin.version = "1.0.0";
-    plugin.description = "Converts selected text to UPPERCASE, lowercase, or Title Case";
-
-    plugin.add_context_menu_item("to_upper", "Transform: UPPERCASE");
-    plugin.add_context_menu_item("to_lower", "Transform: lowercase");
-}
-
-fn on_context_menu_click(action_id, note, ui, system) {
-    let sel = note.get_selection();
-    if sel == "" {
-        ui.toast_warning("Please select text first!");
-        return;
-    }
-
-    if action_id == "to_upper" {
-        note.replace_selection(sel.to_upper());
-        ui.toast_success("Transformed to UPPERCASE ✓");
-    } else if action_id == "to_lower" {
-        note.replace_selection(sel.to_lower());
-        ui.toast_success("Transformed to lowercase ✓");
-    }
-}
-```
-
----
-
-### Example 5: External Shell Formatter
-
-File: `~/.config/quicky_notes/plugins/code_formatter.rhai`
-
-```rhai
-fn init(plugin) {
-    plugin.name = "Code Formatter";
-    plugin.author = "Community";
-    plugin.version = "1.0.0";
-    plugin.description = "Formats JSON/Rust/Python using external CLI formatters (jq / rustfmt / black)";
-
-    plugin.add_header_button("btn_format", "⚡", "Format Code (Ctrl+Shift+I)", "right");
-    plugin.add_shortcut("format_code", "Ctrl+Shift+I");
-    plugin.add_context_menu_item_with_icon("format_code", "Format Document (CLI)", "⚡");
-}
-
-fn on_header_click(button_id, note, ui, system) {
-    if button_id == "btn_format" {
-        format_note(note, ui, system);
-    }
-}
-
-fn on_shortcut(action_id, note, ui, system) {
-    if action_id == "format_code" {
-        format_note(note, ui, system);
-    }
-}
-
-fn on_context_menu_click(action_id, note, ui, system) {
-    if action_id == "format_code" {
-        format_note(note, ui, system);
-    }
-}
-
-fn format_note(note, ui, system) {
-    let content = note.get_text();
-    if content.trim() == "" {
-        return;
-    }
-
-    let fp = note.get_file_path();
-    if fp.ends_with(".json") {
-        let formatted = system.exec_sync("jq", [".", fp]);
-        if formatted != "" {
-            note.set_text(formatted);
-            ui.toast_success("Formatted JSON via jq ✓");
-        }
-    } else if fp.ends_with(".rs") {
-        system.exec_sync("rustfmt", [fp]);
-        ui.toast_success("Formatted Rust file via rustfmt ✓");
-    } else {
-        ui.toast_info("No dedicated CLI formatter found for file type.");
-    }
-}
-```
-
----
-
-## 6. Security & Sandboxing
-
-To prevent infinite loops, UI freezing, or excessive memory consumption, the plugin engine enforces hard security quotas:
-
-1. **Max Operations (`500,000` steps)**: Any script stuck in an infinite loop (`while true {}`) is aborted automatically without blocking the egui UI frame thread.
-2. **Max Call Depth (`50` frames)**: Recursion depth is strictly capped to prevent stack overflows.
-3. **Max String Size (`5 MB`)**: String allocations within scripts cannot exceed 5 MB.
-4. **Max Exec Output (`1 MB`)**: `system.exec_sync` truncates command stdout output at 1 MB to prevent process memory exhaustion.
-5. **Path Traversal Protection**: Folder opening and terminal spawning resolve safe user directories and reject unauthorized paths.
+1. **Max Operations (`500,000` steps)**: Prevents hanging scripts from blocking the UI thread.
+2. **Max Call Depth (`50` frames)**: Protects against stack overflow from uncontrolled recursion.
+3. **Max String Size (`5 MB`)**: Bounds heap allocations inside scripts.
+4. **Max HTTP Payload (`5 MB`)**: Prevents oversized network responses from causing OOM errors.
+5. **HTTP Timeout (`10 Seconds`)**: All network calls time out automatically.
+6. **Path Traversal Protection**: Folder opening and terminal spawning enforce safe directory boundaries.

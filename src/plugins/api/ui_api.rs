@@ -1,6 +1,5 @@
-//! UI feedback and clipboard interaction API exposed to Rhai scripts.
-
 use crate::app::ToastKind;
+use crate::plugins::types::PanelAction;
 use std::sync::{Arc, Mutex};
 
 /// Internal UI side effects buffer.
@@ -9,10 +8,11 @@ pub struct UiHandleInner {
     pub toasts: Vec<(String, ToastKind)>,
     pub status_msg: Option<String>,
     pub copy_clipboard: Option<String>,
+    pub panel_actions: Vec<PanelAction>,
     pub request_repaint: bool,
 }
 
-/// UI proxy object collecting toast notifications and clipboard side effects during script execution.
+/// UI proxy object collecting toast notifications, clipboard, and panel side effects.
 #[derive(Debug, Clone, Default)]
 pub struct UiHandle {
     inner: Arc<Mutex<UiHandleInner>>,
@@ -71,6 +71,43 @@ impl UiHandle {
         crate::ui::context_menu::get_clipboard_text()
     }
 
+    /// Opens the bottom output console panel with a title and content.
+    pub fn show_panel(&mut self, title: String, content: String) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner
+                .panel_actions
+                .push(PanelAction::Show { title, content });
+        }
+    }
+
+    /// Appends new text to the bottom output console panel.
+    pub fn append_panel(&mut self, text: String) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.panel_actions.push(PanelAction::Append(text));
+        }
+    }
+
+    /// Replaces the content in the bottom output console panel.
+    pub fn set_panel_content(&mut self, content: String) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.panel_actions.push(PanelAction::SetContent(content));
+        }
+    }
+
+    /// Clears text in the bottom output console panel.
+    pub fn clear_panel(&mut self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.panel_actions.push(PanelAction::Clear);
+        }
+    }
+
+    /// Closes and hides the bottom output console panel.
+    pub fn hide_panel(&mut self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.panel_actions.push(PanelAction::Hide);
+        }
+    }
+
     /// Requests an egui frame redraw.
     pub fn request_repaint(&mut self) {
         if let Ok(mut inner) = self.inner.lock() {
@@ -99,6 +136,14 @@ impl UiHandle {
         self.inner
             .lock()
             .map(|mut i| i.copy_clipboard.take())
+            .unwrap_or_default()
+    }
+
+    /// Takes all queued panel control actions.
+    pub fn take_panel_actions(&self) -> Vec<PanelAction> {
+        self.inner
+            .lock()
+            .map(|mut i| std::mem::take(&mut i.panel_actions))
             .unwrap_or_default()
     }
 

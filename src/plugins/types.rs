@@ -58,6 +58,39 @@ pub struct PluginMenuItem {
     pub icon: Option<String>,
 }
 
+/// A recurring background timer registered by a plugin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginTimer {
+    /// Unique timer identifier triggered periodically.
+    pub id: String,
+    /// Interval period in seconds between timer ticks.
+    pub interval_seconds: u64,
+}
+
+/// Commands for controlling the bottom output console / panel drawer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelAction {
+    /// Shows panel with title and initial content.
+    Show { title: String, content: String },
+    /// Appends new text to the active panel content.
+    Append(String),
+    /// Replaces the active panel content entirely.
+    SetContent(String),
+    /// Clears the active panel content.
+    Clear,
+    /// Hides the bottom panel.
+    Hide,
+}
+
+/// Color mutations applied dynamically by plugins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThemeMutation {
+    /// Overrides the accent color with a hex string (e.g. "#7AA2F7").
+    SetAccent(String),
+    /// Resets the accent color to the user's active theme palette.
+    ResetAccent,
+}
+
 /// Metadata and manifest attributes for an installed plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginMetadata {
@@ -115,6 +148,10 @@ pub struct PluginActionOutcome {
     pub status_msg: Option<String>,
     /// Text to copy to system clipboard.
     pub copy_to_clipboard: Option<String>,
+    /// Panel actions for the bottom drawer.
+    pub panel_actions: Vec<PanelAction>,
+    /// Theme color mutations.
+    pub theme_mutations: Vec<ThemeMutation>,
     /// Whether an egui frame repaint was requested.
     pub request_repaint: bool,
 }

@@ -79,7 +79,7 @@ pub fn render_floating_toast(app: &mut QuickyNotesApp, ctx: &egui::Context) {
     };
 
     let slide_offset = (1.0 - alpha_factor) * 8.0;
-    let palette = theme::get_palette(&app.data.settings);
+    let palette = app.active_palette();
     let kind_color = toast.kind.color(&palette);
 
     let alpha_u8 = (255.0 * alpha_factor) as u8;
