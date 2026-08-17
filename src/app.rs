@@ -130,6 +130,9 @@ pub struct QuickyNotesApp {
 
     /// Last timestamp for real-time external disk change polling.
     pub last_disk_sync: Instant,
+
+    /// Plugin management subsystem for Rhai script extensions.
+    pub plugin_manager: crate::plugins::PluginManager,
 }
 
 impl QuickyNotesApp {
@@ -155,6 +158,10 @@ impl QuickyNotesApp {
         // Pre-index existing notes and load dictionary asynchronously
         let note_texts = data.notes.iter().map(|n| n.content.clone()).collect();
         let suggest_rx = crate::suggest::SuggestionEngine::start_async_load(note_texts);
+
+        // Initialize plugin subsystem with user's disabled settings
+        let mut plugin_manager = crate::plugins::PluginManager::new();
+        plugin_manager.load_plugins(&data.settings.plugins.disabled_plugins);
 
         Self {
             data,
@@ -197,6 +204,7 @@ impl QuickyNotesApp {
             show_folder_sidebar: false,
             folder_dialog_rx: None,
             last_disk_sync: Instant::now(),
+            plugin_manager,
         }
     }
 
@@ -278,6 +286,111 @@ impl QuickyNotesApp {
         let msg = text.into();
         self.set_status(msg.clone());
         self.toast = Some(Toast::new(msg, kind));
+    }
+
+    // -------------------------------------------------------------------------
+    // Plugin Subsystem Event Dispatch & Outcome Application
+    // -------------------------------------------------------------------------
+
+    /// Applies mutations, toasts, status messages, and clipboard changes from a plugin execution.
+    pub fn apply_plugin_outcome(&mut self, outcome: crate::plugins::PluginActionOutcome) {
+        for mutation in outcome.mutations {
+            match mutation {
+                crate::plugins::NoteMutation::SetText(text) => {
+                    if let Some(note) = self.active_note_mut() {
+                        note.content = text;
+                        note.update_timestamp();
+                        self.is_dirty = true;
+                    }
+                }
+                crate::plugins::NoteMutation::ReplaceSelection(text) => {
+                    let cursor = self.last_cursor_range;
+                    if let Some(note) = self.active_note_mut() {
+                        if let Some((start, end)) = cursor {
+                            let s = start.min(end);
+                            let e = start.max(end);
+                            note.replace_char_range(s, e, &text);
+                        } else {
+                            note.content.push_str(&text);
+                        }
+                        note.update_timestamp();
+                        self.is_dirty = true;
+                    }
+                }
+                crate::plugins::NoteMutation::InsertAtCursor(text) => {
+                    let cursor = self.last_cursor_range;
+                    if let Some(note) = self.active_note_mut() {
+                        if let Some((start, _)) = cursor {
+                            note.insert_at_char(start, &text);
+                        } else {
+                            note.content.push_str(&text);
+                        }
+                        note.update_timestamp();
+                        self.is_dirty = true;
+                    }
+                }
+                crate::plugins::NoteMutation::SetTitle(title) => {
+                    if let Some(note) = self.active_note_mut() {
+                        note.title = crate::note::Note::sanitize_title(&title);
+                        note.update_timestamp();
+                        self.is_dirty = true;
+                    }
+                }
+            }
+        }
+
+        for (msg, kind) in outcome.toasts {
+            self.show_toast(msg, kind);
+        }
+
+        if let Some(status) = outcome.status_msg {
+            self.status_msg = Some((status, Instant::now()));
+        }
+
+        if let Some(clipboard_text) = outcome.copy_to_clipboard
+            && let Ok(mut clipboard) = arboard::Clipboard::new()
+        {
+            let _ = clipboard.set_text(clipboard_text);
+        }
+    }
+
+    /// Dispatches a custom header icon button click to active plugins.
+    pub fn dispatch_plugin_header_button(&mut self, button_id: &str) {
+        if !self.data.settings.plugins.enabled {
+            return;
+        }
+        let note = self.active_note();
+        let cursor = self.last_cursor_range;
+        let outcome = self
+            .plugin_manager
+            .dispatch_header_click(button_id, note, cursor);
+        self.apply_plugin_outcome(outcome);
+    }
+
+    /// Dispatches a registered global keyboard shortcut to active plugins.
+    pub fn dispatch_plugin_shortcut(&mut self, action_id: &str) {
+        if !self.data.settings.plugins.enabled {
+            return;
+        }
+        let note = self.active_note();
+        let cursor = self.last_cursor_range;
+        let outcome = self
+            .plugin_manager
+            .dispatch_shortcut(action_id, note, cursor);
+        self.apply_plugin_outcome(outcome);
+    }
+
+    /// Dispatches an editor right-click context menu action to active plugins.
+    pub fn dispatch_plugin_context_menu(&mut self, action_id: &str) {
+        if !self.data.settings.plugins.enabled {
+            return;
+        }
+        let note = self.active_note();
+        let cursor = self.last_cursor_range;
+        let outcome = self
+            .plugin_manager
+            .dispatch_context_menu(action_id, note, cursor);
+        self.apply_plugin_outcome(outcome);
     }
 
     // -------------------------------------------------------------------------
@@ -435,6 +548,14 @@ impl QuickyNotesApp {
             self.set_status("Synced & saved");
         } else if !force {
             self.set_status("Auto-saved");
+        }
+
+        // Dispatch on_save lifecycle event to enabled plugins
+        if self.data.settings.plugins.enabled {
+            let note = self.active_note();
+            let cursor = self.last_cursor_range;
+            let outcome = self.plugin_manager.dispatch_on_save(note, cursor);
+            self.apply_plugin_outcome(outcome);
         }
     }
 
@@ -654,6 +775,7 @@ mod tests {
             show_folder_sidebar: false,
             folder_dialog_rx: None,
             last_disk_sync: Instant::now(),
+            plugin_manager: crate::plugins::PluginManager::new(),
         }
     }
 

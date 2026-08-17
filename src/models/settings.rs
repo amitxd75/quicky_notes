@@ -398,6 +398,34 @@ impl WindowSettings {
     }
 }
 
+/// Plugin system settings and enabled states.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PluginSettings {
+    /// Whether the plugin runtime is enabled.
+    pub enabled: bool,
+    /// List of plugin IDs that are explicitly disabled by the user.
+    pub disabled_plugins: Vec<String>,
+}
+
+impl Default for PluginSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            disabled_plugins: Vec::new(),
+        }
+    }
+}
+
+impl PluginSettings {
+    /// Validates and ensures plugin settings invariants.
+    pub fn validate_and_clamp(&mut self) {
+        self.disabled_plugins.retain(|id| !id.trim().is_empty());
+        self.disabled_plugins.sort();
+        self.disabled_plugins.dedup();
+    }
+}
+
 /// Global user settings configuration container.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -414,6 +442,8 @@ pub struct AppSettings {
     pub ai: crate::ai::AiSettings,
     /// User-customizable keyboard shortcut keybindings map.
     pub keybindings: crate::ui::shortcuts::KeyBindings,
+    /// Plugin system and extension script settings.
+    pub plugins: PluginSettings,
 }
 
 impl AppSettings {
@@ -423,6 +453,7 @@ impl AppSettings {
         self.appearance.validate_and_clamp();
         self.editor.validate_and_clamp();
         self.window.validate_and_clamp();
+        self.plugins.validate_and_clamp();
         self.keybindings.ensure_all_actions_present();
     }
 
@@ -527,5 +558,24 @@ mod tests {
         assert_eq!(loaded.editor.editor_font, "JetBrains Mono");
         assert_eq!(loaded.appearance.ui_font_size, 15.0);
         assert_eq!(loaded.appearance.theme_mode, ThemeMode::CyberpunkCyan);
+        assert!(loaded.plugins.enabled);
+    }
+
+    #[test]
+    fn test_plugin_settings_deduplication_and_validation() {
+        let mut plugin_settings = PluginSettings {
+            enabled: true,
+            disabled_plugins: vec![
+                "terminal".to_string(),
+                "   ".to_string(),
+                "terminal".to_string(),
+                "formatter".to_string(),
+            ],
+        };
+        plugin_settings.validate_and_clamp();
+        assert_eq!(
+            plugin_settings.disabled_plugins,
+            vec!["formatter".to_string(), "terminal".to_string()]
+        );
     }
 }

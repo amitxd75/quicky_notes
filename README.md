@@ -1,27 +1,19 @@
-# Quicky Notes
+# Quicky Notes (WIP)
 
 Lightweight floating glassmorphism note widget and fast code scratchpad for Hyprland, Wayland, and Linux desktops.
 
 ![Quicky Notes](./assets/screenshot-main.png)
-
 ## Core Highlights
 
-- **Adaptive Glassmorphism & Wallpaper Sync**:
-  Real-time dynamic palette extraction from active desktop wallpaper via Pywal and Caelestia caches, alongside curated presets and an AI-driven natural language theme generator.
-
-- **Embedded Predictive Autocomplete**:
-  Zero-latency dual-engine autocomplete combining an in-memory Radix Trie and Markov bigram language model for predictive ghost text and single-key Tab completions.
-
-- **Multi-Provider AI Copilot**:
-  Integrated assistance supporting Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for in-editor refactoring, summaries, explanations, and custom prompts.
-
-- **Portable `.qn` Containers & Direct Disk Linking**:
-  Standalone binary note format with embedded image attachments, plus direct filesystem file and folder workspace editing with external modification detection (`mtime`).
-
-- **Syntax Highlighting & Soft-Wrap Aware Gutter**:
-  Real-time syntax highlighting across 15+ programming languages with pixel-locked line numbers that maintain exact row alignment across wrapped lines.
+- **Adaptive Glassmorphism & Wallpaper Sync**: Real-time palette extraction from your wallpaper using Pywal and Caelestia, plus AI-driven theme generation.
+- **Embedded Predictive Autocomplete**: Zero-latency ghost text powered by a dual-engine Radix Trie and Markov bigram model.
+- **Multi-Provider AI Copilot**: Native support for Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for refactoring and summaries.
+- **Portable `.qn` Containers & Direct Disk Linking**: Binary note format with image embedding, plus live filesystem editing with automatic mtime detection.
+- **Syntax Highlighting & Soft-Wrap Aware Gutter**: Highlighting for 15+ languages with stable, pixel-locked line numbering.
+- **Embedded Rhai Scripting**: A sandboxed Rust engine for custom buttons, hotkeys, and hot-reloadable community plugins.
 
 ![Settings](./assets/screenshot-settings.png)
+![Plugin Manager](./assets/screenshot-plugin.png)
 
 ## Installation
 
@@ -81,7 +73,10 @@ hl.rule({
 
 ## Documentation
 
+- [Plugin Ecosystem & Developer Guide](docs/plugin_ecosystem.md)
+- [Example Plugins (Rhai)](examples/)
 - [Suggestion Engine Architecture](docs/suggestion_engine_architecture.md)
+
 ## License
 
 MIT

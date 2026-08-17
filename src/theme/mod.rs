@@ -14,6 +14,8 @@ pub const ACCENT_EMERALD: Color32 = Color32::from_rgb(46, 204, 113);
 pub const ACCENT_PURPLE: Color32 = Color32::from_rgb(168, 85, 247);
 /// Accent Amber color constant.
 pub const ACCENT_AMBER: Color32 = Color32::from_rgb(245, 158, 11);
+/// Accent Rose color constant.
+pub const ACCENT_ROSE: Color32 = Color32::from_rgb(244, 63, 94);
 
 /// Available theme modes for quick customization.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

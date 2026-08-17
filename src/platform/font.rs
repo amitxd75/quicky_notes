@@ -42,6 +42,8 @@ pub const CANDIDATE_MONOSPACE_FONTS: &[&str] = &[
 
 /// Ordered candidate priority for discovering vector symbol glyphs.
 pub const CANDIDATE_SYMBOLS_FONTS: &[&str] = &[
+    "Noto Sans Symbols 2",
+    "Noto Sans Symbols",
     "DejaVu Sans",
     "DejaVuSans",
     "Symbola",
@@ -58,7 +60,18 @@ pub const CANDIDATE_NERD_FONTS: &[&str] = &[
 ];
 
 /// Ordered candidate priority for discovering system color emojis.
-pub const CANDIDATE_EMOJI_FONTS: &[&str] = &["Noto Emoji", "DejaVu Sans", "emoji"];
+pub const CANDIDATE_EMOJI_FONTS: &[&str] = &[
+    "Noto Color Emoji",
+    "NotoColorEmoji",
+    "Noto Emoji",
+    "Twitter Color Emoji",
+    "Twemoji",
+    "Apple Color Emoji",
+    "JoyPixels",
+    "Symbola",
+    "DejaVu Sans",
+    "emoji",
+];
 
 static CACHED_SYSTEM_FONTS: OnceLock<Vec<String>> = OnceLock::new();
 static CACHED_MONOSPACE_FONTS: OnceLock<Vec<String>> = OnceLock::new();

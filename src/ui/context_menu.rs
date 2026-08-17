@@ -33,6 +33,8 @@ pub enum ContextMenuAction {
     SearchNotes,
     /// Saves current notes to disk.
     SaveNotes,
+    /// Custom action registered by an active plugin.
+    PluginAction(String),
 }
 
 /// Renders the floating right-click context menu and captures user action.
@@ -41,6 +43,7 @@ pub fn render_editor_context_menu(
     note: &Note,
     cursor_range: Option<(usize, usize)>,
     palette: &Palette,
+    plugin_items: &[crate::plugins::PluginMenuItem],
     action_out: &mut Option<ContextMenuAction>,
 ) {
     let has_selection = cursor_range.is_some_and(|(start, end)| start < end);
@@ -48,92 +51,116 @@ pub fn render_editor_context_menu(
     let can_paste = !clipboard_content.is_empty() || has_clipboard_image();
 
     ui.set_min_width(220.0);
-    ui.spacing_mut().item_spacing.y = 3.0;
+    ui.set_max_width(290.0);
+    ui.spacing_mut().item_spacing.y = 2.0;
 
-    ui.vertical(|ui| {
-        // ─── 1. AI Copilot ───
-        let ai_label = if has_selection {
-            "✨ AI Copilot (Selection)..."
-        } else {
-            "✨ AI Copilot & Fixer..."
-        };
-        if menu_item(ui, ai_label, "Ctrl+Enter", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::LaunchAi);
-            ui.close();
-        }
+    egui::ScrollArea::vertical()
+        .id_salt("editor_context_menu_scroll")
+        .max_height(340.0)
+        .auto_shrink([true, true])
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                // ─── 1. AI Copilot ───
+                let ai_label = if has_selection {
+                    "✨ AI Copilot (Selection)..."
+                } else {
+                    "✨ AI Copilot & Fixer..."
+                };
+                if menu_item(ui, ai_label, "Ctrl+Enter", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::LaunchAi);
+                    ui.close();
+                }
 
-        menu_separator(ui, palette);
+                menu_separator(ui, palette);
 
-        // ─── 2. Clipboard Operations ───
-        if menu_item(ui, "✂ Cut", "Ctrl+X", palette, has_selection).clicked() {
-            *action_out = Some(ContextMenuAction::Cut);
-            ui.close();
-        }
+                // ─── 2. Clipboard Operations ───
+                if menu_item(ui, "✂ Cut", "Ctrl+X", palette, has_selection).clicked() {
+                    *action_out = Some(ContextMenuAction::Cut);
+                    ui.close();
+                }
 
-        let copy_label = if has_selection {
-            "📋 Copy"
-        } else {
-            "📋 Copy All"
-        };
-        if menu_item(ui, copy_label, "Ctrl+C", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::Copy);
-            ui.close();
-        }
+                let copy_label = if has_selection {
+                    "📋 Copy"
+                } else {
+                    "📋 Copy All"
+                };
+                if menu_item(ui, copy_label, "Ctrl+C", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::Copy);
+                    ui.close();
+                }
 
-        if menu_item(ui, "📥 Paste", "Ctrl+V", palette, can_paste).clicked() {
-            *action_out = Some(ContextMenuAction::Paste);
-            ui.close();
-        }
+                if menu_item(ui, "📥 Paste", "Ctrl+V", palette, can_paste).clicked() {
+                    *action_out = Some(ContextMenuAction::Paste);
+                    ui.close();
+                }
 
-        if menu_item(ui, "🖼 Add Image...", "Ctrl+Shift+I", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::AttachImage);
-            ui.close();
-        }
+                if menu_item(ui, "🖼 Add Image...", "Ctrl+Shift+I", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::AttachImage);
+                    ui.close();
+                }
 
-        if menu_item(ui, "🗑 Delete", "Del", palette, has_selection).clicked() {
-            *action_out = Some(ContextMenuAction::Delete);
-            ui.close();
-        }
+                if menu_item(ui, "🗑 Delete", "Del", palette, has_selection).clicked() {
+                    *action_out = Some(ContextMenuAction::Delete);
+                    ui.close();
+                }
 
-        menu_separator(ui, palette);
+                menu_separator(ui, palette);
 
-        // ─── 3. File & Folder Operations ───
-        if menu_item(ui, "📥 Open File...", "Ctrl+O", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::OpenFile);
-            ui.close();
-        }
+                // ─── 3. File & Folder Operations ───
+                if menu_item(ui, "📥 Open File...", "Ctrl+O", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::OpenFile);
+                    ui.close();
+                }
 
-        if menu_item(ui, "📁 Open Folder...", "Ctrl+Shift+O", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::OpenFolder);
-            ui.close();
-        }
+                if menu_item(ui, "📁 Open Folder...", "Ctrl+Shift+O", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::OpenFolder);
+                    ui.close();
+                }
 
-        menu_separator(ui, palette);
+                menu_separator(ui, palette);
 
-        // ─── 4. Selection & Search Operations ───
-        if menu_item(
-            ui,
-            "🔲 Select All",
-            "Ctrl+A",
-            palette,
-            !note.content.is_empty(),
-        )
-        .clicked()
-        {
-            *action_out = Some(ContextMenuAction::SelectAll);
-            ui.close();
-        }
+                // ─── 4. Selection & Search Operations ───
+                if menu_item(
+                    ui,
+                    "🔲 Select All",
+                    "Ctrl+A",
+                    palette,
+                    !note.content.is_empty(),
+                )
+                .clicked()
+                {
+                    *action_out = Some(ContextMenuAction::SelectAll);
+                    ui.close();
+                }
 
-        if menu_item(ui, "🔍 Search Notes", "Ctrl+K", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::SearchNotes);
-            ui.close();
-        }
+                if menu_item(ui, "🔍 Search Notes", "Ctrl+K", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::SearchNotes);
+                    ui.close();
+                }
 
-        if menu_item(ui, "💾 Save to Disk", "Ctrl+S", palette, true).clicked() {
-            *action_out = Some(ContextMenuAction::SaveNotes);
-            ui.close();
-        }
-    });
+                if menu_item(ui, "💾 Save to Disk", "Ctrl+S", palette, true).clicked() {
+                    *action_out = Some(ContextMenuAction::SaveNotes);
+                    ui.close();
+                }
+
+                // ─── 5. Plugin Actions (if any registered) ───
+                if !plugin_items.is_empty() {
+                    menu_separator(ui, palette);
+                    for item in plugin_items {
+                        let label = if let Some(ref icon) = item.icon {
+                            format!("{} {}", icon, item.label)
+                        } else {
+                            format!("🔌 {}", item.label)
+                        };
+                        if menu_item(ui, &label, "", palette, true).clicked() {
+                            *action_out =
+                                Some(ContextMenuAction::PluginAction(item.action_id.clone()));
+                            ui.close();
+                        }
+                    }
+                }
+            });
+        });
 }
 
 /// Helper function to render a styled, interactive context menu item with shortcut badge.
@@ -218,7 +245,7 @@ fn menu_item(
             );
         }
 
-        ui.allocate_rect(rect, Sense::hover())
+        response
     }
 }
 

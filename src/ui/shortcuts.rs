@@ -221,6 +221,44 @@ impl KeyBinding {
         }
     }
 
+    /// Parses a key combination string like "Ctrl+`", "Ctrl+Shift+T", "Alt+F12", "F12".
+    pub fn from_string(s: &str) -> Self {
+        let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+        let mut ctrl = false;
+        let mut shift = false;
+        let mut alt = false;
+        let mut key = String::new();
+
+        for part in parts {
+            match part.to_lowercase().as_str() {
+                "ctrl" | "control" => ctrl = true,
+                "shift" => shift = true,
+                "alt" => alt = true,
+                other => {
+                    if !other.is_empty() {
+                        key = if other == "`"
+                            || other == "~"
+                            || other == "backquote"
+                            || other == "grave"
+                            || other == "backtick"
+                        {
+                            "`".to_string()
+                        } else {
+                            other.to_uppercase()
+                        };
+                    }
+                }
+            }
+        }
+
+        Self {
+            key,
+            ctrl,
+            shift,
+            alt,
+        }
+    }
+
     /// Returns true if this keybinding is unassigned.
     pub fn is_empty(&self) -> bool {
         self.key.trim().is_empty()
@@ -909,6 +947,28 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             app.data.settings.editor.font_size
         ));
         ctx.request_repaint();
+    }
+
+    // 3. Custom Plugin Shortcuts
+    if app.data.settings.plugins.enabled {
+        let plugin_shortcuts: Vec<_> = app
+            .plugin_manager
+            .all_shortcuts()
+            .into_iter()
+            .cloned()
+            .collect();
+        let mut triggered_plugin_action = None;
+        for s in plugin_shortcuts {
+            let kb = KeyBinding::from_string(&s.key_combination);
+            if ctx.input(|i| kb.matches_input(i)) {
+                triggered_plugin_action = Some(s.action_id.clone());
+                break;
+            }
+        }
+        if let Some(action_id) = triggered_plugin_action {
+            app.dispatch_plugin_shortcut(&action_id);
+            ctx.request_repaint();
+        }
     }
 
     // Direct Ctrl+V clipboard handler (prioritizes image screenshot/file paste)

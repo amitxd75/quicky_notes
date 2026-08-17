@@ -8,6 +8,7 @@ pub mod components;
 pub mod engine;
 pub mod models;
 pub mod platform;
+pub mod plugins;
 pub mod storage;
 pub mod theme;
 pub mod ui;
@@ -19,6 +20,7 @@ pub use models::note;
 pub use models::settings;
 pub use platform::crash;
 pub use platform::font;
+pub use plugins::PluginManager;
 
 use app::QuickyNotesApp;
 use eframe::egui;

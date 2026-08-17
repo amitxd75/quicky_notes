@@ -44,6 +44,16 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
             // 1. Calculate exact width needed for all right-hand action button groups
             let has_folder = app.folder_workspace.is_some();
             let has_md = app.active_note().is_some_and(|n| n.is_markdown());
+            let plugin_btn_count = if app.data.settings.plugins.enabled {
+                app.plugin_manager
+                    .all_header_buttons()
+                    .iter()
+                    .filter(|b| b.position == crate::plugins::HeaderButtonPosition::Right)
+                    .count()
+            } else {
+                0
+            };
+            let plugin_btn_width = plugin_btn_count as f32 * (HEADER_BTN_SIZE.x + 4.0);
 
             let right_buttons_width = RIGHT_CONTROLS_BASE_WIDTH
                 + (if has_folder {
@@ -55,7 +65,8 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     RIGHT_CONTROLS_MARKDOWN_WIDTH
                 } else {
                     0.0
-                });
+                })
+                + plugin_btn_width;
 
             let available_tab_width =
                 (ui.available_width() - right_buttons_width - 8.0).max(MIN_TABS_SCROLL_WIDTH);
@@ -452,5 +463,29 @@ fn render_right_controls(
         app.show_options = false;
         app.show_search = false;
         app.create_new_note();
+    }
+
+    // 11. Custom Plugin Header Action Buttons
+    if app.data.settings.plugins.enabled {
+        let plugin_btns: Vec<_> = app
+            .plugin_manager
+            .all_header_buttons()
+            .into_iter()
+            .filter(|b| b.position == crate::plugins::HeaderButtonPosition::Right)
+            .cloned()
+            .collect();
+
+        let mut clicked_id = None;
+        for btn in plugin_btns {
+            let p_btn = button::icon_button(ui, &btn.icon, false, palette, 14.0, HEADER_BTN_SIZE);
+            if p_btn.on_hover_text(&btn.tooltip).clicked() {
+                clicked_id = Some(btn.id.clone());
+            }
+        }
+
+        if let Some(id) = clicked_id {
+            app.dispatch_plugin_header_button(&id);
+            ctx.request_repaint();
+        }
     }
 }

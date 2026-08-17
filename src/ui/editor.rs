@@ -137,13 +137,18 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
 
     let total_width = ui.available_width();
     let full_height = ui.available_height();
+    let plugin_menu_items: Vec<_> = if app.data.settings.plugins.enabled {
+        app.plugin_manager
+            .all_menu_items()
+            .into_iter()
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
 
-    let sidebar_width = if show_sidebar {
-        folder_workspace
-            .as_ref()
-            .map_or(crate::ui::folder_tree::DEFAULT_SIDEBAR_WIDTH, |ws| {
-                ws.sidebar_width
-            })
+    let sidebar_width = if let Some(ws) = folder_workspace.as_ref() {
+        ws.sidebar_width
     } else {
         0.0
     };
@@ -253,9 +258,10 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                         language,
                                         is_monospace,
                                         font_size,
-                                        "Type your notes here...",
+                                        "Start typing your note here... (Markdown supported)",
                                         should_focus,
                                         &mut content_changed,
+                                        &plugin_menu_items,
                                         &mut context_menu_action,
                                     );
                                 });
@@ -263,19 +269,19 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
 
                         crate::app::MarkdownViewMode::Preview => {
                             let preview_resp = egui::ScrollArea::vertical()
-                                .id_salt("preview_scroll_area")
+                                .id_salt("markdown_preview_scroll_area")
                                 .auto_shrink([false, false])
                                 .max_height(editor_height)
                                 .min_scrolled_height(editor_height)
                                 .show(ui, |ui| {
-                                    ui.add_space(4.0);
+                                    ui.set_min_height(editor_height);
                                     if note.content.trim().is_empty() {
+                                        ui.add_space(20.0);
                                         ui.vertical_centered(|ui| {
-                                            ui.add_space(40.0);
                                             ui.label(
-                                                RichText::new("Markdown preview is empty.")
+                                                RichText::new("Preview is empty. Switch to Edit mode to write content.")
                                                     .font(FontId::proportional(14.0))
-                                                    .color(Color32::from_gray(120)),
+                                                    .color(Color32::from_gray(130)),
                                             );
                                         });
                                     } else {
@@ -302,6 +308,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                     note,
                                     *last_cursor_range,
                                     &palette,
+                                    &plugin_menu_items,
                                     &mut context_menu_action,
                                 );
                             });
@@ -317,7 +324,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                             let right_width = (usable_width - left_width).max(50.0);
 
                             ui.horizontal(|ui| {
-                                // Left column: Editor
+                                 // Left column: Editor
                                 ui.vertical(|ui| {
                                     ui.set_width(left_width);
                                     ui.set_height(editor_height);
@@ -346,6 +353,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                                 "Type notes here...",
                                                 should_focus,
                                                 &mut content_changed,
+                                                &plugin_menu_items,
                                                 &mut context_menu_action,
                                             );
                                         });
@@ -426,6 +434,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                         note,
                                         *last_cursor_range,
                                         &palette,
+                                        &plugin_menu_items,
                                         &mut context_menu_action,
                                     );
                                 });
@@ -553,6 +562,9 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                     "Notes saved to disk ✓",
                     crate::ui::toast::ToastKind::Success,
                 );
+            }
+            crate::ui::context_menu::ContextMenuAction::PluginAction(ref action_id) => {
+                app.dispatch_plugin_context_menu(action_id);
             }
         }
         _ctx.request_repaint();
@@ -1084,6 +1096,7 @@ fn render_multiline_editor_pane(
     hint_text: &str,
     should_focus: bool,
     content_changed: &mut bool,
+    plugin_items: &[crate::plugins::PluginMenuItem],
     context_menu_action: &mut Option<crate::ui::context_menu::ContextMenuAction>,
 ) {
     debug_assert!(
@@ -1237,6 +1250,7 @@ fn render_multiline_editor_pane(
             note,
             *last_cursor_range,
             palette,
+            plugin_items,
             context_menu_action,
         );
     });
