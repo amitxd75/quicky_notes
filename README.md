@@ -2,6 +2,8 @@
 
 A cross-platform, lightweight floating glassmorphism note widget and fast code scratchpad for **Linux** (Wayland & X11) and **Windows** (10 & 11).
 
+> **Note**: This branch (`feat/windows-support`) exists to demonstrate that porting Quicky Notes to Windows is fully functional and viable. Because the maintainer does not primarily use Windows, this branch may become outdated over time.
+
 ![Quicky Notes](./assets/screenshot-main.png)
 
 ## Core Highlights
