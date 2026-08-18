@@ -942,6 +942,24 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                     |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
 
+                        // 0. Visual Resize Grip in bottom-right corner
+                        let grip_resp = ui.add(
+                            egui::Label::new(
+                                RichText::new("⋰")
+                                    .font(FontId::proportional(12.0))
+                                    .color(Palette::with_alpha(palette.muted_text, 160)),
+                            )
+                            .sense(egui::Sense::drag()),
+                        );
+                        if grip_resp.hovered() || grip_resp.dragged() {
+                            ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+                        }
+                        if grip_resp.drag_started() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(
+                                egui::viewport::ResizeDirection::SouthEast,
+                            ));
+                        }
+
                         // 1. UTF-8 Indicator
                         if !is_ultra_compact {
                             let utf8_resp = ui.add(
@@ -1663,8 +1681,8 @@ fn render_plugin_bottom_panel(
                     if ui
                         .add(
                             egui::Button::new(
-                                RichText::new("✕")
-                                    .font(FontId::proportional(12.0))
+                                RichText::new("×")
+                                    .font(FontId::proportional(14.0))
                                     .color(palette.muted_text),
                             )
                             .frame(false),

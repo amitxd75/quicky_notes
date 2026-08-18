@@ -33,3 +33,6 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
 ] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

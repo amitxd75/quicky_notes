@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Quicky Notes - Floating glassmorphism note widget and code scratchpad for Linux and Windows.
 //!
 //! Entry point for initializing application settings, window options, eframe runner,

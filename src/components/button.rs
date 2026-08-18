@@ -426,22 +426,47 @@ pub fn icon_button(
         );
     }
 
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        icon,
-        FontId::proportional(font_size),
-        Color32::WHITE,
-    );
+    if icon == "✕" || icon == "×" || icon == "x" || icon == "X" {
+        let center = rect.center();
+        let half = (font_size * 0.35).max(3.5);
+        let cross_color = if act_anim > 0.01 || hov_anim > 0.01 {
+            Color32::WHITE
+        } else {
+            Color32::from_gray(210)
+        };
+        let cross_stroke = Stroke::new(1.4, cross_color);
+        ui.painter().line_segment(
+            [
+                center + egui::vec2(-half, -half),
+                center + egui::vec2(half, half),
+            ],
+            cross_stroke,
+        );
+        ui.painter().line_segment(
+            [
+                center + egui::vec2(-half, half),
+                center + egui::vec2(half, -half),
+            ],
+            cross_stroke,
+        );
+    } else {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            FontId::proportional(font_size),
+            Color32::WHITE,
+        );
+    }
 
     response
 }
 
-/// Renders a drawer close button ("Close ✕").
+/// Renders a drawer close button ("Close ×").
 pub fn close_button(ui: &mut Ui, palette: &Palette) -> egui::Response {
     ui.add(
         egui::Button::new(
-            RichText::new("Close  ✕")
+            RichText::new("Close  ×")
                 .font(FontId::proportional(12.5))
                 .color(Color32::WHITE),
         )

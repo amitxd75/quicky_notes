@@ -38,6 +38,17 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
     // Solid outer header container bar
     card::glass_header_frame(&app.data.settings).show(ui, |ui| {
+        // Drag window from empty space in the header bar
+        let header_rect = ui.max_rect();
+        let bg_drag = ui.interact(
+            header_rect,
+            ui.id().with("header_window_drag_interaction"),
+            Sense::drag(),
+        );
+        if bg_drag.drag_started() {
+            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        }
+
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
 
@@ -56,6 +67,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
             let plugin_btn_width = plugin_btn_count as f32 * (HEADER_BTN_SIZE.x + 4.0);
 
             let right_buttons_width = RIGHT_CONTROLS_BASE_WIDTH
+                + 32.0 // Minimize button
                 + (if has_folder {
                     RIGHT_CONTROLS_FOLDER_WIDTH
                 } else {
@@ -362,12 +374,18 @@ fn render_right_controls(
     ui: &mut Ui,
     palette: &theme::Palette,
 ) {
-    // 1. Close Window (✕) Button
-    let close_app_btn = button::icon_button(ui, "✕", false, palette, 13.0, WINDOW_CTRL_BTN_SIZE);
+    // 1. Close Window (×) Button
+    let close_app_btn = button::icon_button(ui, "×", false, palette, 13.0, WINDOW_CTRL_BTN_SIZE);
     if close_app_btn.on_hover_text("Close window").clicked() {
         app.is_closing = true;
         app.save_if_dirty();
         ctx.send_viewport_cmd(ViewportCommand::Close);
+    }
+
+    // 2. Minimize Window (−) Button
+    let min_app_btn = button::icon_button(ui, "−", false, palette, 13.0, WINDOW_CTRL_BTN_SIZE);
+    if min_app_btn.on_hover_text("Minimize window").clicked() {
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
     }
 
     ui.separator();

@@ -292,7 +292,7 @@ pub fn render_folder_sidebar(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Close Folder button
                         let btn_close = ui.add(
-                            egui::Button::new(RichText::new("✕").font(FontId::proportional(11.0)))
+                            egui::Button::new(RichText::new("×").font(FontId::proportional(13.0)))
                                 .frame(false),
                         );
                         if btn_close.on_hover_text("Close folder workspace").clicked() {

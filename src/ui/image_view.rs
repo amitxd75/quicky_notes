@@ -266,7 +266,7 @@ pub fn render_attachment_popup_button(
                             );
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("✕").on_hover_text("Close").clicked() {
+                                if ui.small_button("×").on_hover_text("Close").clicked() {
                                     close_popup = true;
                                 }
                             });
@@ -356,9 +356,9 @@ pub fn render_attachment_popup_button(
                                                         }
                                                         if ui
                                                             .button(
-                                                                RichText::new("✕")
+                                                                RichText::new("×")
                                                                     .font(FontId::proportional(
-                                                                        10.0,
+                                                                        12.0,
                                                                     ))
                                                                     .color(Color32::from_rgb(
                                                                         248, 113, 113,

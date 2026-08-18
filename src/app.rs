@@ -853,6 +853,9 @@ impl QuickyNotesApp {
         // Render modal overlays
         ui::editor::render_drop_hover_overlay(ctx);
         ui::ai_modal::render_ai_copilot_modal(self, ctx);
+
+        // Handle border & corner drag resizing for undecorated glass window
+        ui::handle_window_resizing(ctx);
     }
 }
 

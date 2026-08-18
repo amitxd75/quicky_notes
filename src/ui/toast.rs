@@ -21,7 +21,7 @@ impl ToastKind {
             Self::Success => "✓",
             Self::Info => "⚡",
             Self::Warning => "⚠️",
-            Self::Error => "✕",
+            Self::Error => "✗",
         }
     }
 
