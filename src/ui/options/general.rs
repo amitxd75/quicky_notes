@@ -35,8 +35,7 @@ fn render_general_system_card(
         )
         .changed()
         {
-            let _ =
-                crate::platform::sync_autostart_desktop_file(app.data.settings.general.autostart);
+            crate::platform::sync_autostart_desktop_file(app.data.settings.general.autostart);
             app.is_dirty = true;
             if app.data.settings.general.autostart {
                 app.show_toast(

@@ -2,8 +2,6 @@
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 use std::collections::HashMap;
-#[cfg(not(windows))]
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 /// Embedded high-legibility UI sans-serif font (Inter).
@@ -24,42 +22,16 @@ pub fn get_installed_system_fonts() -> Vec<String> {
             let mut fonts = vec!["Default".to_string()];
 
             #[cfg(target_os = "linux")]
-            if let Ok(output) = Command::new("fc-list").arg(":").arg("family").output()
-                && output.status.success()
-            {
-                let font_str = String::from_utf8_lossy(&output.stdout);
-                let mut detected: Vec<String> = font_str
-                    .lines()
-                    .flat_map(|line| line.split(','))
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty() && !s.contains(':'))
-                    .collect();
-
-                detected.sort();
-                detected.dedup();
-
-                for f in detected {
-                    if !fonts.contains(&f) {
-                        fonts.push(f);
-                    }
+            for f in crate::platform::linux::font::discover_system_ui_fonts() {
+                if !fonts.contains(&f) {
+                    fonts.push(f);
                 }
             }
 
             #[cfg(windows)]
-            {
-                let candidates = &[
-                    "Segoe UI",
-                    "Aptos",
-                    "Calibri",
-                    "Arial",
-                    "Inter",
-                    "Roboto",
-                    "Noto Sans",
-                ];
-                for p in candidates {
-                    if resolve_font_path(p).is_some() && !fonts.contains(&p.to_string()) {
-                        fonts.push(p.to_string());
-                    }
+            for f in crate::platform::windows::font::discover_system_ui_fonts() {
+                if !fonts.contains(&f) {
+                    fonts.push(f);
                 }
             }
 
@@ -76,124 +48,22 @@ pub fn get_installed_monospace_fonts() -> Vec<String> {
             let mut fonts = vec!["Default".to_string()];
 
             #[cfg(target_os = "linux")]
-            if let Ok(output) = Command::new("fc-list")
-                .arg(":spacing=mono")
-                .arg("family")
-                .output()
-                && output.status.success()
-            {
-                let font_str = String::from_utf8_lossy(&output.stdout);
-                let mut detected: Vec<String> = font_str
-                    .lines()
-                    .flat_map(|line| line.split(','))
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty() && !s.contains(':'))
-                    .collect();
-
-                detected.sort();
-                detected.dedup();
-
-                for f in detected {
-                    if !fonts.contains(&f) {
-                        fonts.push(f);
-                    }
+            for f in crate::platform::linux::font::discover_monospace_fonts() {
+                if !fonts.contains(&f) {
+                    fonts.push(f);
                 }
             }
 
             #[cfg(windows)]
-            {
-                let candidates = &[
-                    "Cascadia Code",
-                    "Cascadia Mono",
-                    "Consolas",
-                    "Fira Code",
-                    "JetBrains Mono",
-                    "Lucida Console",
-                    "Courier New",
-                ];
-                for p in candidates {
-                    if resolve_font_path(p).is_some() && !fonts.contains(&p.to_string()) {
-                        fonts.push(p.to_string());
-                    }
+            for f in crate::platform::windows::font::discover_monospace_fonts() {
+                if !fonts.contains(&f) {
+                    fonts.push(f);
                 }
             }
 
             fonts
         })
         .clone()
-}
-
-#[cfg(windows)]
-fn query_platform_font_path(pattern: &str) -> Option<String> {
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
-    let fonts_dir = std::path::PathBuf::from(windir).join("Fonts");
-    if !fonts_dir.exists() {
-        return None;
-    }
-
-    let p_lower = pattern.to_lowercase();
-    let direct_candidates: &[(&str, &[&str])] = &[
-        ("segoe ui emoji", &["seguiemj.ttf"]),
-        ("segoe ui symbol", &["seguisym.ttf"]),
-        ("segoe ui", &["segoeui.ttf", "segoeuib.ttf"]),
-        (
-            "cascadia code",
-            &["CascadiaCode.ttf", "cascadiacode.ttf", "Cascadia.ttf"],
-        ),
-        ("cascadia mono", &["CascadiaMono.ttf", "cascadiamono.ttf"]),
-        ("consolas", &["consola.ttf", "consolab.ttf"]),
-        ("lucida console", &["lucon.ttf"]),
-        ("courier new", &["cour.ttf"]),
-        ("calibri", &["calibri.ttf"]),
-        ("arial", &["arial.ttf"]),
-        ("aptos mono", &["aptos-mono.ttf", "AptosMono.ttf"]),
-        ("aptos", &["aptos.ttf", "Aptos.ttf"]),
-    ];
-
-    for (name, files) in direct_candidates {
-        if p_lower.contains(name) {
-            for f in *files {
-                let candidate_path = fonts_dir.join(f);
-                if candidate_path.exists() {
-                    return Some(candidate_path.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    let sanitized_name = pattern.replace(' ', "");
-    for ext in &["ttf", "otf", "ttc"] {
-        let direct_file = fonts_dir.join(format!("{}.{}", sanitized_name, ext));
-        if direct_file.exists() {
-            return Some(direct_file.to_string_lossy().to_string());
-        }
-        let lower_file = fonts_dir.join(format!("{}.{}", sanitized_name.to_lowercase(), ext));
-        if lower_file.exists() {
-            return Some(lower_file.to_string_lossy().to_string());
-        }
-    }
-
-    None
-}
-
-#[cfg(not(windows))]
-fn query_platform_font_path(pattern: &str) -> Option<String> {
-    if let Ok(output) = Command::new("fc-match")
-        .arg("-f")
-        .arg("%{file}")
-        .arg(pattern)
-        .output()
-        && output.status.success()
-    {
-        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path_str.is_empty() && std::path::Path::new(&path_str).exists() {
-            Some(path_str)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
 }
 
 /// Queries system font provider (fontconfig on Linux, %WINDIR%/Fonts on Windows) to resolve font paths.
@@ -206,7 +76,14 @@ pub fn resolve_font_path(pattern: &str) -> Option<String> {
         return cached.clone();
     }
 
-    let resolved = query_platform_font_path(pattern);
+    #[cfg(target_os = "linux")]
+    let resolved = crate::platform::linux::font::query_platform_font_path(pattern);
+
+    #[cfg(windows)]
+    let resolved = crate::platform::windows::font::query_platform_font_path(pattern);
+
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let resolved: Option<String> = None;
 
     if let Ok(mut guard) = cache_map.lock() {
         guard.insert(pattern.to_string(), resolved.clone());
