@@ -4,10 +4,12 @@ version = "1.0.0"
 edition = "2024"
 
 license = "MIT"
-description = "Lightweight floating glassmorphism note widget and code scratchpad for Linux"
+description = "Lightweight cross-platform floating glassmorphism note widget and code scratchpad for Linux and Windows"
 repository = "https://github.com/amitxd/quicky_notes"
 authors = ["amitxd"]
 rust-version = "1.97"
+keywords = ["notes", "scratchpad", "markdown", "glassmorphism", "gui"]
+categories = ["gui", "text-editors", "command-line-utilities"]
 
 [dependencies]
 eframe = "0.36.1"

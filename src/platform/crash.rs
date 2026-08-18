@@ -1,11 +1,11 @@
-//! Crash reporting module that intercepts panics and dumps detailed diagnostic logs
-//! to `~/.config/quicky_notes/logs/log_<timestamp>.log` (or `logs/log_<timestamp>.log`).
+//! Cross-platform crash reporting module that intercepts panics and dumps detailed diagnostic logs
+//! to the application log directory (`~/.config/quicky_notes/logs/` on Linux, `%APPDATA%\quicky_notes\logs\` on Windows).
 
 use std::fs::File;
 use std::io::Write;
 use std::panic;
 
-/// Installs custom panic hook to dump crash logs with timestamp, OS details, panic message, and backtrace.
+/// Installs custom panic hook to dump crash logs with timestamp, OS details, display server, memory, panic message, and backtrace.
 pub fn install_crash_handler() {
     let default_hook = panic::take_hook();
 
@@ -13,6 +13,19 @@ pub fn install_crash_handler() {
         let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
         let log_dir = crate::storage::AppData::logs_dir();
         let log_file = log_dir.join(format!("log_{}.log", timestamp));
+
+        let display_server = crate::platform::diagnostics::detect_display_server();
+        let memory_str = crate::platform::diagnostics::get_process_memory()
+            .map(|m| {
+                format!(
+                    "Resident: {}, Private Heap: {}, Shared Libs: {}, Virtual: {}",
+                    crate::platform::diagnostics::format_bytes(m.resident_bytes),
+                    crate::platform::diagnostics::format_bytes(m.private_heap_bytes),
+                    crate::platform::diagnostics::format_bytes(m.shared_lib_bytes),
+                    crate::platform::diagnostics::format_bytes(m.virtual_bytes)
+                )
+            })
+            .unwrap_or_else(|| "Unavailable".to_string());
 
         let mut report = String::new();
         report.push_str("====================================================\n");
@@ -24,10 +37,15 @@ pub fn install_crash_handler() {
         ));
         report.push_str(&format!("Version: {}\n", env!("CARGO_PKG_VERSION")));
         report.push_str(&format!(
-            "OS / Target: {} {}\n\n",
+            "OS / Target: {} {}\n",
             std::env::consts::OS,
             std::env::consts::ARCH
         ));
+        report.push_str(&format!(
+            "Display Compositor / Server: {}\n",
+            display_server
+        ));
+        report.push_str(&format!("Memory Footprint: {}\n\n", memory_str));
 
         if let Some(location) = panic_info.location() {
             report.push_str(&format!(
@@ -60,6 +78,21 @@ pub fn install_crash_handler() {
                 "\n[Quicky Notes] CRASH DETECTED! Diagnostic log written to:\n  {:?}\n",
                 log_file
             );
+
+            #[cfg(windows)]
+            {
+                // When running under the Windows GUI subsystem without a console,
+                // present a native message dialog so the user knows where the crash log is saved.
+                rfd::MessageDialog::new()
+                    .set_title("Quicky Notes - Unexpected Error")
+                    .set_description(format!(
+                        "An unexpected crash occurred.\n\nA diagnostic log has been written to:\n{}\n\nPayload: {}",
+                        log_file.display(),
+                        payload_msg
+                    ))
+                    .set_level(rfd::MessageLevel::Error)
+                    .show();
+            }
         }
 
         default_hook(panic_info);

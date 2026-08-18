@@ -1,22 +1,26 @@
-# Quicky Notes (WIP)
+# Quicky Notes
 
-Lightweight floating glassmorphism note widget and fast code scratchpad for Hyprland, Wayland, and Linux desktops.
+A cross-platform, lightweight floating glassmorphism note widget and fast code scratchpad for **Linux** (Wayland & X11) and **Windows** (10 & 11).
 
 ![Quicky Notes](./assets/screenshot-main.png)
+
 ## Core Highlights
 
-- **Adaptive Glassmorphism & Wallpaper Sync**: Real-time palette extraction from your wallpaper using Pywal and Caelestia, plus AI-driven theme generation.
-- **Embedded Predictive Autocomplete**: Zero-latency ghost text powered by a dual-engine Radix Trie and Markov bigram model.
-- **Multi-Provider AI Copilot**: Native support for Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for refactoring and summaries.
-- **Portable `.qn` Containers & Direct Disk Linking**: Binary note format with image embedding, plus live filesystem editing with automatic mtime detection.
-- **Syntax Highlighting & Soft-Wrap Aware Gutter**: Highlighting for 15+ languages with stable, pixel-locked line numbering.
-- **Embedded Rhai Scripting**: A lightweight Rust scripting engine for custom buttons, hotkeys, and hot-reloadable community plugins.
+- **Cross-Platform Glassmorphism**: Native translucent UI with hardware-accelerated rendering, borderless drag-moving, and 8-way border/corner resizing on Linux (Wayland/X11) and Windows 10/11.
+- **Embedded Typography & Nerd Icons**: Zero external font dependencies and instant startup with bundled **Inter** (proportional UI) and **FiraCode Nerd Font Mono** (code buffer & symbols).
+- **Adaptive Wallpaper Sync**: Real-time palette extraction from your desktop wallpaper using Pywal and Caelestia, plus custom RGB themes and AI-driven palette generation.
+- **Embedded Predictive Autocomplete**: Zero-latency ghost text powered by a native statistical dual-engine (Radix Trie + Markov bigram model).
+- **Multi-Provider AI Copilot**: Native integration with Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for instant editing, formatting, and summaries.
+- **Portable `.qn` Containers & Direct Disk Linking**: Binary note format with embedded image attachments, plus live filesystem editing with automatic external modification sync.
+- **Syntax Highlighting & Soft-Wrap Aware Gutter**: Real-time highlighting for 15+ languages with stable, pixel-locked line numbering and markdown split-preview.
+- **Embedded Rhai Scripting Engine**: A sandboxed Rust scripting engine for custom header buttons, hotkeys, timers, and hot-reloadable community plugins.
 
 ![Settings](./assets/screenshot-settings.png)
 ![Plugin Manager](./assets/screenshot-plugin.png)
 
 ## Installation
 
+### Linux
 ```bash
 # Using the installer script (binary, desktop entry, and icons)
 ./scripts/install.sh
@@ -25,41 +29,54 @@ Lightweight floating glassmorphism note widget and fast code scratchpad for Hypr
 cargo install --path .
 ```
 
+### Windows
+```powershell
+# Build optimized release executable (with embedded icon resource)
+cargo build --release
+
+# Run
+.\target\release\quicky_notes.exe
+```
+
 ## CLI Usage
 
 ```bash
 # Launch note widget
 quicky
 
-# Open specific files
+# Open specific files into separate tabs
 quicky note.md main.rs document.qn
 
-# Open folder workspace
-quicky -f ~/projects/my_project
+# Open folder workspace explorer
+quicky -F ~/projects/my_project
 
-# Launch with folder sidebar open
-quicky --sidebar ~/projects/my_project
+# Launch directly with a clean new tab
+quicky -n
+
+# View help and version
+quicky --help
+quicky --version
 ```
 
-## Shortcuts
+## Default Shortcuts
 
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + N` | New Note Tab |
 | `Ctrl + W` | Close Active Tab |
-| `Ctrl + S` | Save Notes / Linked Files |
-| `Ctrl + O` | Open File Dialog |
+| `Ctrl + S` | Save Notes / Linked Files to Disk |
+| `Ctrl + O` | Open File via Native File Picker |
 | `Ctrl + Shift + O` | Open Folder Workspace Dialog |
-| `Ctrl + F` | Search Notes |
-| `Ctrl + ,` | Settings / Options |
-| `Ctrl + M` | Cycle Markdown Mode (Edit / Split / Preview) |
-| `Ctrl + Shift + F` | Toggle Folder Sidebar |
-| `Ctrl + Space` | Open AI Copilot |
-| `Tab` | Accept Ghost Autocomplete |
+| `Ctrl + F` | Search Notes Drawer |
+| `Ctrl + ,` | Settings & Preferences Drawer |
+| `Ctrl + M` | Cycle Markdown Mode (Edit / Split / View) |
+| `Ctrl + Shift + F` | Toggle Folder Workspace Sidebar |
+| `Ctrl + Space` | Open AI Copilot Modal |
+| `Tab` | Accept Ghost Predictive Autocomplete |
 
-## Window Manager & Desktop Integration
+## Desktop & Window Manager Integration
 
-### Hyprland (Lua)
+### Linux (Hyprland Lua Example)
 ```lua
 -- ~/.config/hypr/hyprland.lua
 hl.bind("SUPER + N", hl.dsp.exec_cmd("quicky"), { desc = "Toggle Quicky Notes" })
@@ -70,6 +87,10 @@ hl.rule({
     size = { 860, 600 },
 })
 ```
+
+### Windows 10 / 11
+- Automatically launches silently into the GUI without opening a console terminal.
+- Launch on Startup can be toggled in **Settings (Ctrl + ,) > General > Autostart**.
 
 ## Documentation
 
