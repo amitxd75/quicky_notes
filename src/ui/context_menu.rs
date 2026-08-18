@@ -265,6 +265,8 @@ pub fn set_clipboard_text(text: &str) {
     if let Ok(mut cb) = arboard::Clipboard::new() {
         let _ = cb.set_text(text);
     }
+
+    #[cfg(target_os = "linux")]
     if let Ok(mut child) = std::process::Command::new("wl-copy")
         .stdin(std::process::Stdio::piped())
         .spawn()
@@ -286,6 +288,7 @@ pub fn get_clipboard_text() -> String {
         }
     }
 
+    #[cfg(target_os = "linux")]
     if let Ok(output) = std::process::Command::new("wl-paste")
         .arg("--no-newline")
         .output()
@@ -337,6 +340,7 @@ pub fn has_clipboard_image() -> bool {
         }
     }
 
+    #[cfg(target_os = "linux")]
     // Wayland check via wl-paste list-types
     if let Ok(output) = std::process::Command::new("wl-paste")
         .arg("--list-types")
@@ -399,6 +403,7 @@ pub fn get_clipboard_image() -> Option<(String, &'static str, Vec<u8>)> {
         }
     }
 
+    #[cfg(target_os = "linux")]
     // 3. Wayland compositor fallback via wl-paste
     for mime_candidate in &["image/png", "image/jpeg", "image/webp"] {
         if let Ok(output) = std::process::Command::new("wl-paste")

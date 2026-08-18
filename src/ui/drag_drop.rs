@@ -68,6 +68,11 @@ pub const BLOCKED_SYSTEM_PREFIXES: &[&str] = &[
     "/var/log/",
     "/sbin/",
     "/bin/",
+    "C:\\Windows\\",
+    "C:\\Windows\\System32\\",
+    "C:\\Program Files\\",
+    "C:\\Program Files (x86)\\",
+    "C:\\Boot\\",
 ];
 
 /// Allowed system paths for runtime, user temp, and removable storage media.
@@ -100,7 +105,7 @@ pub const BLOCKED_DOT_ENTRIES: &[&str] = &[
 /// Validates that a filesystem path is safe to open, read, or link.
 ///
 /// Resolves symlinks via `canonicalize()` and rejects:
-/// - System directories: `/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/var/log`
+/// - System directories: `/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/var/log`, `C:\Windows`, etc.
 /// - Sensitive dotfiles/dotdirs under `$HOME`: `.ssh`, `.gnupg`, `.config/quicky_notes`, `.bashrc`, etc.
 /// - Allows user home directories, removable media mounts, and `/tmp`.
 pub fn is_safe_file_path(path: &Path) -> bool {
@@ -122,7 +127,9 @@ pub fn is_safe_file_path(path: &Path) -> bool {
 
     // Block sensitive system directories
     for prefix in BLOCKED_SYSTEM_PREFIXES {
-        if path_str.starts_with(prefix) {
+        if path_str.starts_with(prefix)
+            || (cfg!(windows) && path_str.to_lowercase().starts_with(&prefix.to_lowercase()))
+        {
             return false;
         }
     }
@@ -134,13 +141,20 @@ pub fn is_safe_file_path(path: &Path) -> bool {
         }
     }
 
+    // Check temp directory
+    let temp_dir = std::env::temp_dir().to_string_lossy().to_string();
+    if !temp_dir.is_empty() && path_str.starts_with(&temp_dir) {
+        return true;
+    }
+
     // Check home directory sensitive entries
     if let Some(user_dirs) = directories::UserDirs::new() {
         let home = user_dirs.home_dir().to_string_lossy().to_string();
         if let Some(rel) = path_str.strip_prefix(&home) {
-            let rel = rel.trim_start_matches('/');
+            let rel_clean = rel.trim_start_matches(['/', '\\']);
             for blocked in BLOCKED_DOT_ENTRIES {
-                if rel.starts_with(blocked) {
+                let blocked_win = blocked.replace('/', "\\");
+                if rel_clean.starts_with(blocked) || rel_clean.starts_with(&blocked_win) {
                     return false;
                 }
             }
@@ -150,55 +164,41 @@ pub fn is_safe_file_path(path: &Path) -> bool {
     true
 }
 
-/// Safely opens a directory in the system file manager via `xdg-open`.
+/// Safely opens a directory in the system file manager via `explorer` (Windows) or `xdg-open` (Linux).
 ///
 /// Canonicalizes the path and validates it exists and is a directory before
-/// passing to `xdg-open`. Returns `false` if the path is invalid.
+/// passing to the desktop opener. Returns `false` if the path is invalid.
 pub fn safe_open_folder(path: &Path) -> bool {
     match std::fs::canonicalize(path) {
         Ok(canonical) if canonical.is_dir() => {
-            let _ = std::process::Command::new("xdg-open")
-                .arg(&canonical)
-                .spawn();
-            true
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("explorer")
+                    .arg(&canonical)
+                    .spawn();
+                true
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&canonical)
+                    .spawn();
+                true
+            }
         }
         _ => false,
     }
 }
 
-/// Safely runs a native desktop file selection command (Zenity with Kdialog fallback).
-fn run_native_dialog(zenity_args: &[&str], kdialog_args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("zenity")
-        .args(zenity_args)
-        .output()
-        .or_else(|_| {
-            std::process::Command::new("kdialog")
-                .args(kdialog_args)
-                .output()
-        });
-
-    if let Ok(out) = output
-        && out.status.success()
-    {
-        let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !path_str.is_empty() {
-            Some(path_str)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-/// Spawns a native file dialog (Zenity/Kdialog) on a background thread.
+/// Spawns a native file open dialog (via rfd) on a background thread.
 ///
 /// Returns a `Receiver` that will yield the selected file path (or `None` on cancel).
 /// The UI thread remains responsive while the dialog is open.
 pub fn spawn_file_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = run_native_dialog(&["--file-selection"], &["--getopenfilename"]);
+        let file = rfd::FileDialog::new().pick_file();
+        let result = file.map(|p| p.to_string_lossy().to_string());
         let _ = tx.send(result);
     });
     rx
@@ -208,16 +208,13 @@ pub fn spawn_file_dialog() -> mpsc::Receiver<Option<String>> {
 pub fn spawn_image_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = run_native_dialog(
-            &[
-                "--file-selection",
-                "--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg",
-            ],
-            &[
-                "--getopenfilename",
-                "*.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg",
-            ],
-        );
+        let file = rfd::FileDialog::new()
+            .add_filter(
+                "Images",
+                &["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"],
+            )
+            .pick_file();
+        let result = file.map(|p| p.to_string_lossy().to_string());
         let _ = tx.send(result);
     });
     rx
@@ -371,14 +368,12 @@ pub fn poll_file_dialog(app: &mut QuickyNotesApp) {
     }
 }
 
-///// Spawns a native directory selection dialog (Zenity/Kdialog) on a background thread.
+/// Spawns a native directory selection dialog (via rfd) on a background thread.
 pub fn spawn_folder_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = run_native_dialog(
-            &["--file-selection", "--directory"],
-            &["--getexistingdirectory"],
-        );
+        let folder = rfd::FileDialog::new().pick_folder();
+        let result = folder.map(|p| p.to_string_lossy().to_string());
         let _ = tx.send(result);
     });
     rx
@@ -521,26 +516,21 @@ pub fn spawn_export_dialog(
 ) -> mpsc::Receiver<Result<String, String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let initial_path = directories::UserDirs::new()
-            .and_then(|u| u.document_dir().map(|d| d.join(&default_filename)))
-            .unwrap_or_else(|| std::path::PathBuf::from(&default_filename));
+        let initial_dir = directories::UserDirs::new()
+            .and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-        let initial_str = initial_path.to_string_lossy().to_string();
-
-        let filename_arg = format!("--filename={}", initial_str);
-        let chosen_opt = run_native_dialog(
-            &[
-                "--file-selection",
-                "--save",
-                "--confirm-overwrite",
-                &filename_arg,
-            ],
-            &["--getsavefilename", &initial_str],
-        );
+        let chosen_opt = rfd::FileDialog::new()
+            .set_directory(&initial_dir)
+            .set_file_name(&default_filename)
+            .save_file();
 
         let target_path = match chosen_opt {
-            Some(chosen) if !chosen.is_empty() => std::path::PathBuf::from(chosen),
-            _ => initial_path,
+            Some(chosen) => chosen,
+            None => {
+                let _ = tx.send(Err("Export cancelled".to_string()));
+                return;
+            }
         };
 
         if let Some(parent) = target_path.parent() {
@@ -648,20 +638,16 @@ pub fn export_settings(app: &mut QuickyNotesApp) {
     };
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = if let Some(path_str) = run_native_dialog(
-            &[
-                "--file-selection",
-                "--save",
-                "--confirm-overwrite",
-                "--filename=quicky_settings.json",
-                "--file-filter=JSON Config | *.json",
-            ],
-            &["--getsavefilename", "quicky_settings.json", "*.json"],
-        ) {
-            if let Err(e) = std::fs::write(&path_str, json_text) {
+        let chosen = rfd::FileDialog::new()
+            .set_file_name("quicky_settings.json")
+            .add_filter("JSON Config", &["json"])
+            .save_file();
+
+        let result = if let Some(path) = chosen {
+            if let Err(e) = std::fs::write(&path, json_text) {
                 Err(format!("Save failed: {}", e))
             } else {
-                Ok(path_str)
+                Ok(path.to_string_lossy().to_string())
             }
         } else {
             Err("Export cancelled".to_string())
@@ -679,11 +665,12 @@ pub fn import_settings(app: &mut QuickyNotesApp) {
     }
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = if let Some(path_str) = run_native_dialog(
-            &["--file-selection", "--file-filter=JSON Config | *.json"],
-            &["--getopenfilename", "*.json"],
-        ) {
-            match std::fs::read_to_string(&path_str) {
+        let chosen = rfd::FileDialog::new()
+            .add_filter("JSON Config", &["json"])
+            .pick_file();
+
+        let result = if let Some(path) = chosen {
+            match std::fs::read_to_string(&path) {
                 Ok(json) => Ok(json),
                 Err(e) => Err(format!("Read failed: {}", e)),
             }
@@ -915,5 +902,11 @@ mod tests {
         assert!(!is_safe_file_path(Path::new("/proc/self/environ")));
         assert!(!is_safe_file_path(Path::new("/sys/class")));
         assert!(!is_safe_file_path(Path::new("/dev/null")));
+        assert!(!is_safe_file_path(Path::new(
+            "C:\\Windows\\System32\\cmd.exe"
+        )));
+        assert!(!is_safe_file_path(Path::new(
+            "C:\\Program Files\\app\\config.ini"
+        )));
     }
 }

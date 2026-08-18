@@ -7,13 +7,17 @@ use std::sync::{Arc, Mutex};
 /// Maximum allowed output capture in bytes (1 MB) to prevent memory exhaustion.
 pub const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
 
-/// Candidate terminal emulator binary names ordered by modern Linux desktop popularity.
+/// Candidate terminal emulator binary names ordered by platform desktop popularity.
 pub const TERMINAL_CANDIDATES: &[&str] = &[
+    "wt",
+    "powershell",
+    "cmd",
     "kitty",
     "alacritty",
     "foot",
     "ghostty",
     "wezterm",
+    "wezterm-gui",
     "gnome-terminal",
     "konsole",
     "xfce4-terminal",
@@ -65,7 +69,7 @@ impl SystemHandle {
             }
         }
 
-        // 2. Iterate through common Linux terminal emulators
+        // 2. Iterate through common platform terminal emulators
         for term in TERMINAL_CANDIDATES {
             if is_binary_available(term) && spawn_terminal_in_dir(term, &dir) {
                 return true;
@@ -191,12 +195,24 @@ impl SystemHandle {
     pub fn open_url(&mut self, url: String) {
         let trimmed = url.trim();
         if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-            let _ = Command::new("xdg-open")
-                .arg(trimmed)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
+            #[cfg(windows)]
+            {
+                let _ = Command::new("cmd")
+                    .args(["/c", "start", "", trimmed])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = Command::new("xdg-open")
+                    .arg(trimmed)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
         }
     }
 
@@ -222,6 +238,17 @@ fn spawn_terminal_in_dir(term_bin: &str, dir: &Path) -> bool {
 
     // Provide directory-specific flags where appropriate
     match term_bin {
+        "wt" | "wt.exe" => {
+            cmd.arg("-d").arg(dir);
+        }
+        "powershell" | "powershell.exe" => {
+            cmd.arg("-NoExit")
+                .arg("-Command")
+                .arg(format!("Set-Location '{}'", dir.display()));
+        }
+        "cmd" | "cmd.exe" => {
+            cmd.arg("/K").arg(format!("cd /d \"{}\"", dir.display()));
+        }
         "kitty" => {
             cmd.arg("--directory").arg(dir);
         }
@@ -231,7 +258,7 @@ fn spawn_terminal_in_dir(term_bin: &str, dir: &Path) -> bool {
         "foot" => {
             cmd.arg("-D").arg(dir);
         }
-        "wezterm" => {
+        "wezterm" | "wezterm-gui" => {
             cmd.arg("start").arg("--cwd").arg(dir);
         }
         "ghostty" => {
@@ -279,6 +306,15 @@ fn is_binary_available(binary: &str) -> bool {
             let full_path = dir.join(binary);
             if full_path.is_file() {
                 return true;
+            }
+            #[cfg(windows)]
+            {
+                if dir.join(format!("{}.exe", binary)).is_file()
+                    || dir.join(format!("{}.cmd", binary)).is_file()
+                    || dir.join(format!("{}.bat", binary)).is_file()
+                {
+                    return true;
+                }
             }
         }
     }

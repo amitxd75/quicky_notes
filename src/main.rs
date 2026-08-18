@@ -1,7 +1,7 @@
-//! Quicky Notes - Floating glassmorphism note widget and code scratchpad for Linux.
+//! Quicky Notes - Floating glassmorphism note widget and code scratchpad for Linux and Windows.
 //!
 //! Entry point for initializing application settings, window options, eframe runner,
-//! and Wayland / X11 desktop viewport configuration.
+//! and cross-platform desktop viewport configuration.
 
 mod app;
 pub mod components;
@@ -73,6 +73,7 @@ fn main() -> Result<(), eframe::Error> {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
 
+    #[cfg(target_os = "linux")]
     unsafe {
         if data.settings.advanced.hardware_acceleration {
             if std::env::var("WGPU_BACKEND").is_err() {

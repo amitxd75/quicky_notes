@@ -9,15 +9,21 @@ use std::fs;
 const PREFIX: &str = "enc:v1:";
 const APP_SALT: &[u8] = b"quicky_notes_secure_local_salt_v1";
 
-/// Derives a machine-specific key using /etc/machine-id or hostname fallback.
+/// Derives a machine-specific key using /etc/machine-id (Linux) or COMPUTERNAME/USERNAME (Windows).
 fn get_machine_key() -> Vec<u8> {
     let mut key = Vec::from(APP_SALT);
     if let Ok(machine_id) = fs::read_to_string("/etc/machine-id") {
         key.extend_from_slice(machine_id.trim().as_bytes());
     } else if let Ok(hostname) = fs::read_to_string("/etc/hostname") {
         key.extend_from_slice(hostname.trim().as_bytes());
-    } else if let Ok(user) = std::env::var("USER") {
+    } else if let Ok(comp) = std::env::var("COMPUTERNAME") {
+        key.extend_from_slice(comp.as_bytes());
+    }
+
+    if let Ok(user) = std::env::var("USER") {
         key.extend_from_slice(user.as_bytes());
+    } else if let Ok(username) = std::env::var("USERNAME") {
+        key.extend_from_slice(username.as_bytes());
     }
     key
 }
