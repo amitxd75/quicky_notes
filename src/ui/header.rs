@@ -17,18 +17,18 @@ pub const TAB_CORNER_RADIUS: u8 = 8;
 pub const TITLE_EDIT_DESIRED_WIDTH: f32 = 100.0;
 
 /// Header action button dimensions in pixels.
-pub const HEADER_BTN_SIZE: egui::Vec2 = egui::vec2(34.0, 32.0);
+pub const HEADER_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 /// Window control button dimensions (minimize, close) in pixels.
 pub const WINDOW_CTRL_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 /// Options / search button dimensions in pixels.
-pub const OPTIONS_BTN_SIZE: egui::Vec2 = egui::vec2(32.0, 30.0);
+pub const OPTIONS_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 
 /// Base width reserved for right-side action controls (Close, Settings, Search, File/Folder buttons, dividers).
-pub const RIGHT_CONTROLS_BASE_WIDTH: f32 = 185.0;
+pub const RIGHT_CONTROLS_BASE_WIDTH: f32 = 160.0;
 /// Additional width reserved when a folder workspace is open (sidebar toggle button).
-pub const RIGHT_CONTROLS_FOLDER_WIDTH: f32 = 38.0;
+pub const RIGHT_CONTROLS_FOLDER_WIDTH: f32 = 32.0;
 /// Additional width reserved when active note is Markdown (preview mode button).
-pub const RIGHT_CONTROLS_MARKDOWN_WIDTH: f32 = 36.0;
+pub const RIGHT_CONTROLS_MARKDOWN_WIDTH: f32 = 32.0;
 /// Minimum safety width for the tab scroll area to prevent underflow.
 pub const MIN_TABS_SCROLL_WIDTH: f32 = 40.0;
 

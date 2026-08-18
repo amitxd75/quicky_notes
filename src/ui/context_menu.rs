@@ -47,17 +47,16 @@ pub fn render_editor_context_menu(
     action_out: &mut Option<ContextMenuAction>,
 ) {
     let has_selection = cursor_range.is_some_and(|(start, end)| start < end);
-    let clipboard_content = get_clipboard_text();
-    let can_paste = !clipboard_content.is_empty() || has_clipboard_image();
 
-    ui.set_min_width(220.0);
-    ui.set_max_width(290.0);
-    ui.spacing_mut().item_spacing.y = 2.0;
+    ui.set_min_width(280.0);
+    ui.set_max_width(320.0);
+    ui.spacing_mut().item_spacing.y = 3.0;
 
     egui::ScrollArea::vertical()
         .id_salt("editor_context_menu_scroll")
-        .max_height(340.0)
+        .max_height(600.0)
         .auto_shrink([true, true])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.vertical(|ui| {
                 // ─── 1. AI Copilot ───
@@ -89,7 +88,7 @@ pub fn render_editor_context_menu(
                     ui.close();
                 }
 
-                if menu_item(ui, "📥 Paste", "Ctrl+V", palette, can_paste).clicked() {
+                if menu_item(ui, "📥 Paste", "Ctrl+V", palette, true).clicked() {
                     *action_out = Some(ContextMenuAction::Paste);
                     ui.close();
                 }
@@ -171,15 +170,15 @@ fn menu_item(
     palette: &Palette,
     enabled: bool,
 ) -> Response {
-    let desired_width = ui.available_width().max(210.0);
-    let height = 28.0;
+    let desired_width = ui.available_width().max(280.0);
+    let height = 30.0;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(desired_width, height), Sense::click());
 
     if enabled {
         let hover = response.hovered();
         let bg_color = if hover {
-            Palette::with_alpha(palette.accent, 60)
+            Palette::with_alpha(palette.accent, 75)
         } else {
             Color32::TRANSPARENT
         };
@@ -192,32 +191,32 @@ fn menu_item(
         let text_color = if hover {
             Color32::WHITE
         } else {
-            Color32::from_gray(235)
+            Color32::from_gray(245)
         };
         let shortcut_color = if hover {
-            Color32::from_gray(215)
+            Color32::from_gray(225)
         } else {
-            Color32::from_gray(145)
+            Color32::from_gray(140)
         };
 
-        // Left: Label
-        let left_pos = egui::pos2(rect.min.x + 10.0, rect.center().y);
+        // Left: Label with proper padding
+        let left_pos = egui::pos2(rect.min.x + 12.0, rect.center().y);
         ui.painter().text(
             left_pos,
             egui::Align2::LEFT_CENTER,
             label,
-            FontId::proportional(12.5),
+            FontId::proportional(13.0),
             text_color,
         );
 
-        // Right: Shortcut key hint
+        // Right: Shortcut key hint with proper right margin
         if !shortcut.is_empty() {
-            let right_pos = egui::pos2(rect.max.x - 10.0, rect.center().y);
+            let right_pos = egui::pos2(rect.max.x - 12.0, rect.center().y);
             ui.painter().text(
                 right_pos,
                 egui::Align2::RIGHT_CENTER,
                 shortcut,
-                FontId::proportional(11.0),
+                FontId::proportional(11.5),
                 shortcut_color,
             );
         }
@@ -225,23 +224,23 @@ fn menu_item(
         response
     } else {
         // Disabled item
-        let left_pos = egui::pos2(rect.min.x + 10.0, rect.center().y);
+        let left_pos = egui::pos2(rect.min.x + 12.0, rect.center().y);
         ui.painter().text(
             left_pos,
             egui::Align2::LEFT_CENTER,
             label,
-            FontId::proportional(12.5),
-            Color32::from_gray(100),
+            FontId::proportional(13.0),
+            Color32::from_gray(110),
         );
 
         if !shortcut.is_empty() {
-            let right_pos = egui::pos2(rect.max.x - 10.0, rect.center().y);
+            let right_pos = egui::pos2(rect.max.x - 12.0, rect.center().y);
             ui.painter().text(
                 right_pos,
                 egui::Align2::RIGHT_CENTER,
                 shortcut,
-                FontId::proportional(11.0),
-                Color32::from_gray(75),
+                FontId::proportional(11.5),
+                Color32::from_gray(80),
             );
         }
 

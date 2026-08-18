@@ -545,6 +545,8 @@ fn render_markdown_image(
     font_size: f32,
 ) {
     let clean_url = url.trim();
+    let decoded_url = crate::ui::drag_drop::url_decode(clean_url);
+
     let att_id_opt = if clean_url.starts_with("attachment:") {
         Some(clean_url.trim_start_matches("attachment:").trim())
     } else if clean_url.starts_with("qn://") {
@@ -553,13 +555,17 @@ fn render_markdown_image(
         None
     };
 
-    // 1. Try finding in note attachments
+    // 1. Try finding in note attachments (checking raw ID, decoded ID, raw name, decoded name)
     if let Some(n) = note {
         let attachment = if let Some(att_id) = att_id_opt {
+            let decoded_id = crate::ui::drag_drop::url_decode(att_id);
             n.get_attachment(att_id)
+                .or_else(|| n.get_attachment(&decoded_id))
                 .or_else(|| n.get_attachment_by_name_or_id(att_id))
+                .or_else(|| n.get_attachment_by_name_or_id(&decoded_id))
         } else {
             n.get_attachment_by_name_or_id(clean_url)
+                .or_else(|| n.get_attachment_by_name_or_id(&decoded_url))
         };
 
         if let Some(att) = attachment
@@ -589,7 +595,52 @@ fn render_markdown_image(
         }
     }
 
-    // 2. Fallback placeholder for missing or unresolvable images
+    // 2. Try loading as a local file on disk (absolute, file:// URI, or relative to linked note file path)
+    let candidate_path = if let Some(stripped) = clean_url.strip_prefix("file://") {
+        Some(std::path::PathBuf::from(crate::ui::drag_drop::url_decode(
+            stripped,
+        )))
+    } else if std::path::Path::new(clean_url).is_absolute() {
+        Some(std::path::PathBuf::from(clean_url))
+    } else if std::path::Path::new(&decoded_url).is_absolute() {
+        Some(std::path::PathBuf::from(&decoded_url))
+    } else if let Some(n) = note
+        && let Some(ref fp) = n.file_path
+    {
+        let base_dir = std::path::Path::new(fp).parent();
+        base_dir.map(|d| d.join(&decoded_url))
+    } else {
+        None
+    };
+
+    if let Some(path) = candidate_path
+        && path.exists()
+        && path.is_file()
+        && let Some(tex) = crate::ui::image_view::get_or_load_file_texture(ui.ctx(), &path)
+    {
+        ui.vertical(|ui| {
+            crate::ui::image_view::render_true_color_image(
+                ui,
+                &tex,
+                ui.available_width(),
+                6,
+                font_size,
+            );
+
+            if !alt.is_empty() {
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(alt)
+                        .font(FontId::proportional((font_size - 3.0).max(9.0)))
+                        .italics()
+                        .color(Color32::from_gray(160)),
+                );
+            }
+        });
+        return;
+    }
+
+    // 3. Fallback placeholder for missing or unresolvable images
     egui::Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
             palette.card.r(),

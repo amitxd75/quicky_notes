@@ -408,20 +408,40 @@ pub fn render_appearance_card(
             ctx.request_repaint();
         }
 
-        // Window Corner Radius Slider
-        let radius_str = format!("{:.0}px", app.data.settings.appearance.corner_radius);
+        // Window Corner Radius Slider (0px for Hyprland/tiling WMs up to 24px)
+        let radius_str = if app.data.settings.appearance.corner_radius <= 0.5 {
+            "0px (Sharp / Tiling)".to_string()
+        } else {
+            format!("{:.0}px", app.data.settings.appearance.corner_radius)
+        };
         if slider::slider_row(
             ui,
             "Window Corner Rounding",
             &radius_str,
             &mut app.data.settings.appearance.corner_radius,
-            4.0..=24.0,
+            0.0..=24.0,
             palette.accent,
         )
         .changed()
         {
             app.data.settings.validate_and_clamp();
             theme::setup_glassmorphism_theme(ctx, &app.data.settings);
+            app.is_dirty = true;
+            ctx.request_repaint();
+        }
+
+        // Show Internal Window Border Toggle (allows Hyprland/tiling WMs to control border)
+        if toggle::toggle_row(
+            ui,
+            "Internal Window Border",
+            &mut app.data.settings.appearance.show_window_border,
+            palette.accent,
+        )
+        .on_hover_text(
+            "Draw internal border frame (disable for Hyprland / external window manager borders)",
+        )
+        .changed()
+        {
             app.is_dirty = true;
             ctx.request_repaint();
         }

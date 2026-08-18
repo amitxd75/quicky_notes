@@ -55,8 +55,8 @@ pub const MAX_TAB_SIZE: u32 = 8;
 /// Default tab indentation width in spaces.
 pub const DEFAULT_TAB_SIZE: u32 = 4;
 
-/// Minimum window corner radius in pixels.
-pub const MIN_CORNER_RADIUS: f32 = 4.0;
+/// Minimum window corner radius in pixels (0.0 allows sharp corners for Hyprland/tiling WMs).
+pub const MIN_CORNER_RADIUS: f32 = 0.0;
 /// Maximum window corner radius in pixels.
 pub const MAX_CORNER_RADIUS: f32 = 24.0;
 /// Default window corner radius in pixels.
@@ -100,7 +100,7 @@ impl WindowSizePreset {
         label: "XL",
         width: 1360.0,
         height: 820.0,
-        default_font_size: 19.0,
+        default_font_size: 18.0,
     };
     pub const ULTRAWIDE: Self = Self {
         label: "Ultrawide",
@@ -195,7 +195,7 @@ impl Default for GeneralSettings {
             restore_session: true,
             live_disk_sync: true,
             auto_sync_wallpaper: true,
-            auto_title_from_first_line: true,
+            auto_title_from_first_line: false,
             default_title_prefix: "note".to_string(),
             auto_close_brackets: true,
             strip_ansi_on_paste: true,
@@ -222,8 +222,10 @@ pub struct AppearanceSettings {
     pub opacity: f32,
     /// Glass blur hardness and surface specular strength (0.0 ..= 1.0).
     pub blur_strength: f32,
-    /// Glass window corner radius roundness in pixels (4.0 ..= 24.0).
+    /// Glass window corner radius roundness in pixels (0.0 ..= 24.0).
     pub corner_radius: f32,
+    /// Whether to render an internal window border stroke (disable for tiling/Hyprland window managers).
+    pub show_window_border: bool,
     /// Selected system / UI font family name.
     pub selected_font: String,
     /// System / UI font size in points (10.0 ..= 24.0).
@@ -239,6 +241,7 @@ impl Default for AppearanceSettings {
             opacity: DEFAULT_OPACITY,
             blur_strength: DEFAULT_BLUR_STRENGTH,
             corner_radius: DEFAULT_CORNER_RADIUS,
+            show_window_border: true,
             selected_font: "Default".to_string(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             custom_colors: CustomThemeColors::default(),
@@ -663,11 +666,14 @@ mod tests {
         assert_eq!(settings.editor.default_extension, ".qn");
         assert_eq!(settings.appearance.selected_font, "Default");
 
-        // Test min clamping for UI font size
+        // Test min clamping for UI font size and corner radius
         let mut min_settings = AppSettings::default();
         min_settings.appearance.ui_font_size = 1.0;
+        min_settings.appearance.corner_radius = -10.0;
         min_settings.validate_and_clamp();
         assert_eq!(min_settings.appearance.ui_font_size, MIN_UI_FONT_SIZE);
+        assert_eq!(min_settings.appearance.corner_radius, MIN_CORNER_RADIUS);
+        assert!(min_settings.appearance.show_window_border);
 
         // Test max clamping
         let mut max_settings = AppSettings::default();

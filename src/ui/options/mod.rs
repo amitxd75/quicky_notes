@@ -188,12 +188,22 @@ fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
             let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
             let is_hovered = response.hovered();
+            let is_pressed = response.is_pointer_button_down_on();
+
             let sel_anim = ui
                 .ctx()
                 .animate_bool_responsive(response.id.with("sel"), is_selected);
             let hov_anim = ui
                 .ctx()
                 .animate_bool_responsive(response.id.with("hov"), is_hovered);
+            let press_anim = ui
+                .ctx()
+                .animate_bool_responsive(response.id.with("press"), is_pressed);
+
+            let mut draw_rect = rect;
+            if press_anim > 0.01 {
+                draw_rect = draw_rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+            }
 
             let normal_bg = Color32::from_rgba_unmultiplied(
                 palette.card.r(),
@@ -220,48 +230,54 @@ fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
                 theme::Palette::interpolate_color(normal_bg, hovered_bg, hov_anim)
             };
 
-            let stroke_alpha = (255.0 * sel_anim) as u8;
-            let stroke = if stroke_alpha > 5 {
-                Stroke::new(
-                    1.2_f32,
-                    Color32::from_rgba_unmultiplied(
-                        palette.accent.r(),
-                        palette.accent.g(),
-                        palette.accent.b(),
-                        stroke_alpha,
-                    ),
-                )
+            let resting_border = theme::Palette::with_alpha(palette.border, 65);
+            let hovered_border = theme::Palette::with_alpha(palette.border, 150);
+            let selected_border = theme::Palette::with_alpha(palette.accent, 220);
+
+            let border_color = if sel_anim > 0.01 {
+                theme::Palette::interpolate_color(resting_border, selected_border, sel_anim)
+            } else if hov_anim > 0.01 {
+                theme::Palette::interpolate_color(resting_border, hovered_border, hov_anim)
             } else {
-                Stroke::NONE
+                resting_border
             };
+            let stroke = Stroke::new(1.0 + 0.2 * sel_anim, border_color);
 
-            ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
-            if stroke != Stroke::NONE {
-                ui.painter().rect_stroke(
-                    rect,
-                    CornerRadius::same(8),
-                    stroke,
-                    egui::StrokeKind::Outside,
-                );
-            }
+            ui.painter()
+                .rect_filled(draw_rect, CornerRadius::same(8), bg);
+            ui.painter().rect_stroke(
+                draw_rect,
+                CornerRadius::same(8),
+                stroke,
+                egui::StrokeKind::Outside,
+            );
 
-            // Centered icon in dedicated 28px left area (Never tint emojis)
+            // Centered icon in dedicated 28px left area with smooth hover micro-scale and lift
+            let icon_scale = 1.0 + (hov_anim * 0.08);
+            let icon_y_lift = -hov_anim * 0.75;
+            let icon_font_size = (14.0 * icon_scale).round();
             ui.painter().text(
-                egui::pos2(rect.left() + 18.0, rect.center().y),
+                egui::pos2(draw_rect.left() + 18.0, draw_rect.center().y + icon_y_lift),
                 egui::Align2::CENTER_CENTER,
                 icon,
-                FontId::proportional(14.0),
+                FontId::proportional(icon_font_size),
                 Color32::WHITE,
             );
 
-            // Left-aligned Label with consistent offset and smooth color transition
-            let text_color = theme::Palette::interpolate_color(
-                Color32::from_gray(185),
-                Color32::WHITE,
-                sel_anim,
-            );
+            // Left-aligned Label with consistent offset and smooth color transition on hover and selection
+            let base_text_color = Color32::from_gray(185);
+            let hovered_text_color = Color32::WHITE;
+            let active_text_color = palette.accent;
+
+            let text_color = if sel_anim > 0.01 {
+                theme::Palette::interpolate_color(base_text_color, active_text_color, sel_anim)
+            } else if hov_anim > 0.01 {
+                theme::Palette::interpolate_color(base_text_color, hovered_text_color, hov_anim)
+            } else {
+                base_text_color
+            };
             ui.painter().text(
-                egui::pos2(rect.left() + 38.0, rect.center().y),
+                egui::pos2(draw_rect.left() + 38.0, draw_rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 label,
                 FontId::proportional(13.0),
@@ -285,12 +301,22 @@ fn render_bottom_bar(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
 
-        let btn_size = egui::vec2(72.0, 24.0);
+        let btn_size = egui::vec2(72.0, 26.0);
         let (rect, response) = ui.allocate_exact_size(btn_size, egui::Sense::click());
         let is_hovered = response.hovered();
+        let is_pressed = response.is_pointer_button_down_on();
+
         let hov_anim = ui
             .ctx()
             .animate_bool_responsive(response.id.with("done_hov"), is_hovered);
+        let press_anim = ui
+            .ctx()
+            .animate_bool_responsive(response.id.with("done_press"), is_pressed);
+
+        let mut draw_rect = rect;
+        if press_anim > 0.01 {
+            draw_rect = draw_rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+        }
 
         let normal_bg = Color32::from_rgba_unmultiplied(
             palette.card.r(),
@@ -301,23 +327,23 @@ fn render_bottom_bar(
         let hovered_bg = theme::Palette::lighten(palette.card, 35, 240);
         let bg_color = theme::Palette::interpolate_color(normal_bg, hovered_bg, hov_anim);
 
-        let stroke_color = theme::Palette::interpolate_color(
-            theme::Palette::with_alpha(palette.border, 120),
-            palette.accent,
-            hov_anim,
-        );
+        let resting_border = theme::Palette::with_alpha(palette.border, 100);
+        let hovered_border = palette.accent;
+        let stroke_color =
+            theme::Palette::interpolate_color(resting_border, hovered_border, hov_anim);
 
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(6), bg_color);
+            .rect_filled(draw_rect, CornerRadius::same(6), bg_color);
         ui.painter().rect_stroke(
-            rect,
+            draw_rect,
             CornerRadius::same(6),
-            Stroke::new(1.0_f32, stroke_color),
+            Stroke::new(1.0 + 0.2 * hov_anim, stroke_color),
             egui::StrokeKind::Outside,
         );
 
+        let y_lift = -hov_anim * 0.5;
         ui.painter().text(
-            rect.center(),
+            egui::pos2(draw_rect.center().x, draw_rect.center().y + y_lift),
             egui::Align2::CENTER_CENTER,
             "Done ✓",
             FontId::proportional(12.0),

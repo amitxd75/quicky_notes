@@ -398,7 +398,8 @@ fn render_node_children(
         }
 
         let is_dir = node.is_dir;
-        let is_expanded = is_dir && expanded_dirs.contains(&node.path);
+        let is_expanded =
+            is_dir && (expanded_dirs.contains(&node.path) || !filter_query.is_empty());
         let node_path_str = node.path.to_string_lossy();
         let is_active = !is_dir && active_file_path == Some(&*node_path_str);
 
@@ -441,74 +442,88 @@ fn render_node_children(
             }
         }
 
-        // Render contents inside the row rect
-        ui.scope_builder(egui::UiBuilder::new().max_rect(row_rect), |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+        // Render contents directly via painter (prevents accidental text selection from blocking folder clicks)
+        let x_start = row_rect.min.x + indent + 4.0;
+        let y_center = row_rect.center().y;
 
-                if indent > 0.0 {
-                    ui.add_space(indent);
-                }
+        if is_dir {
+            let arrow = if is_expanded { "▾" } else { "▸" };
+            let folder_icon = if is_expanded { "📂" } else { "📁" };
 
-                if is_dir {
-                    let arrow = if is_expanded { "▾" } else { "▸" };
-                    let folder_icon = if is_expanded { "📂" } else { "📁" };
+            let arrow_color = if is_expanded {
+                palette.accent
+            } else {
+                Color32::from_gray(150)
+            };
 
-                    ui.label(RichText::new(arrow).font(FontId::proportional(11.0)).color(
-                        if is_expanded {
-                            palette.accent
-                        } else {
-                            Color32::from_gray(150)
-                        },
-                    ));
+            ui.painter().text(
+                egui::pos2(x_start, y_center),
+                egui::Align2::LEFT_CENTER,
+                arrow,
+                FontId::proportional(11.0),
+                arrow_color,
+            );
 
-                    ui.label(
-                        RichText::new(folder_icon)
-                            .font(FontId::proportional(12.0))
-                            .color(Color32::from_rgb(245, 158, 11)),
-                    );
+            ui.painter().text(
+                egui::pos2(x_start + 12.0, y_center),
+                egui::Align2::LEFT_CENTER,
+                folder_icon,
+                FontId::proportional(12.0),
+                Color32::from_rgb(245, 158, 11),
+            );
 
-                    ui.label(
-                        RichText::new(&node.name)
-                            .font(FontId::proportional(11.5))
-                            .color(if is_expanded {
-                                palette.accent
-                            } else {
-                                Color32::from_gray(210)
-                            }),
-                    );
-                } else {
-                    let (icon, icon_color) = get_file_icon(node.extension.as_deref());
+            let name_color = if is_expanded {
+                palette.accent
+            } else if row_resp.hovered() {
+                Color32::WHITE
+            } else {
+                Color32::from_gray(210)
+            };
 
-                    ui.add_space(8.0);
+            ui.painter().text(
+                egui::pos2(x_start + 28.0, y_center),
+                egui::Align2::LEFT_CENTER,
+                &node.name,
+                FontId::proportional(11.5),
+                name_color,
+            );
+        } else {
+            let (icon, icon_color) = get_file_icon(node.extension.as_deref());
 
-                    ui.label(RichText::new(icon).font(FontId::proportional(11.5)).color(
-                        if is_active {
-                            palette.accent
-                        } else {
-                            icon_color
-                        },
-                    ));
+            let final_icon_color = if is_active {
+                palette.accent
+            } else {
+                icon_color
+            };
 
-                    let mut name_rich = RichText::new(&node.name)
-                        .font(FontId::proportional(11.5))
-                        .color(if is_active {
-                            palette.accent
-                        } else {
-                            Color32::from_gray(190)
-                        });
-                    if is_active {
-                        name_rich = name_rich.strong();
-                    }
+            ui.painter().text(
+                egui::pos2(x_start + 12.0, y_center),
+                egui::Align2::LEFT_CENTER,
+                icon,
+                FontId::proportional(11.5),
+                final_icon_color,
+            );
 
-                    ui.label(name_rich);
-                }
-            });
-        });
+            let name_color = if is_active {
+                palette.accent
+            } else if row_resp.hovered() {
+                Color32::WHITE
+            } else {
+                Color32::from_gray(190)
+            };
 
-        if is_dir && row_resp.clicked() {
+            ui.painter().text(
+                egui::pos2(x_start + 28.0, y_center),
+                egui::Align2::LEFT_CENTER,
+                &node.name,
+                FontId::proportional(11.5),
+                name_color,
+            );
+        }
+
+        if is_dir && (row_resp.clicked() || row_resp.double_clicked()) {
             *toggled_path = Some(node.path.clone());
-        } else if !is_dir && row_resp.clicked() {
+        } else if !is_dir && (row_resp.clicked() || row_resp.double_clicked()) {
             *opened_file = Some(node.path.clone());
         }
 

@@ -130,6 +130,48 @@ pub fn get_or_load_attachment_texture_with_limits(
     }
 }
 
+/// Retrieves or decodes an image file on disk into an `egui::TextureHandle`.
+pub fn get_or_load_file_texture(
+    ctx: &egui::Context,
+    file_path: &std::path::Path,
+) -> Option<TextureHandle> {
+    let key = format!("file:{}", file_path.to_string_lossy());
+    let mut cache = get_texture_cache().lock().unwrap();
+
+    if let Some(tex) = cache.textures.get(&key).cloned() {
+        cache.touch(&key);
+        return Some(tex);
+    }
+
+    let bytes = match std::fs::read(file_path) {
+        Ok(b) => b,
+        Err(err) => {
+            eprintln!(
+                "Warning: Failed to read image file '{}': {}",
+                file_path.display(),
+                err
+            );
+            return None;
+        }
+    };
+
+    match decode_color_image_with_limits(&bytes, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS) {
+        Ok(color_img) => {
+            let tex = ctx.load_texture(&key, color_img, TextureOptions::LINEAR);
+            cache.insert(key, tex.clone(), MAX_TEXTURE_CACHE_ENTRIES);
+            Some(tex)
+        }
+        Err(err) => {
+            eprintln!(
+                "Warning: Failed to decode image file '{}': {}",
+                file_path.display(),
+                err
+            );
+            None
+        }
+    }
+}
+
 /// Decodes raw image bytes (PNG, JPEG, WebP, GIF, BMP) into an `egui::ColorImage` using default limits.
 #[allow(dead_code)]
 fn decode_color_image(bytes: &[u8]) -> Result<ColorImage, String> {
@@ -206,23 +248,21 @@ pub fn render_attachment_popup_button(
     let mut is_open = ui.data(|d| d.get_temp::<bool>(popup_id).unwrap_or(false));
 
     let label_text = format!("🖼 {}", att_count);
-    let btn_resp = ui
-        .add(
-            egui::Label::new(
-                RichText::new(label_text)
-                    .font(FontId::proportional(11.5))
-                    .color(if is_open {
-                        palette.accent
-                    } else {
-                        Color32::from_gray(190)
-                    }),
-            )
-            .sense(Sense::click()),
-        )
-        .on_hover_text(format!(
-            "🖼 {} image attachment(s)\nClick to view & manage",
-            att_count
-        ));
+    let btn_resp = crate::components::button::status_bar_item(
+        ui,
+        None,
+        &label_text,
+        if is_open {
+            palette.accent
+        } else {
+            Color32::from_gray(190)
+        },
+        false,
+    )
+    .on_hover_text(format!(
+        "🖼 {} image attachment(s)\nClick to view & manage",
+        att_count
+    ));
 
     if btn_resp.clicked() {
         is_open = !is_open;

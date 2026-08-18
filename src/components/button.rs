@@ -11,19 +11,9 @@ pub fn selection_pill(
     palette: &Palette,
 ) -> egui::Response {
     let pill_id = ui.make_persistent_id(label);
-    let anim = ui.ctx().animate_bool_responsive(pill_id, is_selected);
-
-    let unselected_bg = Palette::with_alpha(palette.card, 150);
-    let selected_bg = Palette::lighten(palette.card, 45, 245);
-    let fill = Palette::interpolate_color(unselected_bg, selected_bg, anim);
-
-    let stroke_alpha = ((80.0 * (1.0 - anim) + 255.0 * anim) as u8).clamp(80, 255);
-    let stroke_color = Color32::from_rgba_unmultiplied(
-        palette.accent.r(),
-        palette.accent.g(),
-        palette.accent.b(),
-        stroke_alpha,
-    );
+    let sel_anim = ui
+        .ctx()
+        .animate_bool_responsive(pill_id.with("sel"), is_selected);
 
     let display_text = if is_selected {
         format!("{}  ✓", label)
@@ -31,17 +21,80 @@ pub fn selection_pill(
         label.to_string()
     };
 
-    ui.add(
-        egui::Button::new(
-            RichText::new(&display_text)
-                .font(FontId::proportional(11.5))
-                .color(Color32::WHITE),
-        )
-        .fill(fill)
-        .stroke(Stroke::new(1.0 + 0.2 * anim, stroke_color))
-        .corner_radius(CornerRadius::same(6))
-        .min_size(egui::vec2(0.0, 28.0)),
-    )
+    let font_size = 11.5_f32;
+    let galley = ui.painter().layout_no_wrap(
+        display_text.clone(),
+        FontId::proportional(font_size),
+        Color32::WHITE,
+    );
+    let text_size = galley.size();
+    let min_size = egui::vec2((text_size.x + 20.0).max(44.0), 28.0);
+    let (mut rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+
+    let is_hovered = response.hovered();
+    let is_pressed = response.is_pointer_button_down_on();
+
+    let hov_anim = ui
+        .ctx()
+        .animate_bool_responsive(response.id.with("hov"), is_hovered);
+    let press_anim = ui
+        .ctx()
+        .animate_bool_responsive(response.id.with("press"), is_pressed);
+
+    if press_anim > 0.01 {
+        rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
+    }
+
+    let unselected_bg = Palette::with_alpha(palette.card, 150);
+    let hovered_bg = Palette::lighten(palette.card, 25, 210);
+    let selected_bg = Palette::lighten(palette.card, 45, 245);
+
+    let bg = if sel_anim > 0.01 {
+        Palette::interpolate_color(unselected_bg, selected_bg, sel_anim)
+    } else {
+        Palette::interpolate_color(unselected_bg, hovered_bg, hov_anim)
+    };
+
+    let resting_border = Palette::with_alpha(palette.border, 75);
+    let hovered_border = Palette::with_alpha(palette.border, 160);
+    let selected_border = palette.accent;
+
+    let border_color = if sel_anim > 0.01 {
+        Palette::interpolate_color(resting_border, selected_border, sel_anim)
+    } else if hov_anim > 0.01 {
+        Palette::interpolate_color(resting_border, hovered_border, hov_anim)
+    } else {
+        resting_border
+    };
+
+    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0 + 0.2 * sel_anim, border_color),
+        egui::StrokeKind::Outside,
+    );
+
+    let text_color = if sel_anim > 0.01 {
+        Color32::WHITE
+    } else if hov_anim > 0.01 {
+        Palette::interpolate_color(Color32::from_gray(210), Color32::WHITE, hov_anim)
+    } else {
+        Color32::from_gray(210)
+    };
+
+    let y_lift = if sel_anim < 0.5 { -hov_anim * 0.5 } else { 0.0 };
+    let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
+    ui.painter().text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        &display_text,
+        FontId::proportional(font_size),
+        text_color,
+    );
+
+    response
 }
 
 /// Renders a compact, clickable glass inspiration or tag chip.
@@ -108,30 +161,28 @@ pub fn animated_action_button(
         rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
     }
 
-    let base_bg = Palette::with_alpha(palette.card, 210);
-    let hovered_bg = Palette::lighten(palette.card, 35, 245);
+    let base_bg = Palette::with_alpha(palette.card, 180);
+    let hovered_bg = Palette::lighten(palette.card, 30, 240);
     let bg = Palette::interpolate_color(base_bg, hovered_bg, hov_anim);
 
-    let base_border = Color32::from_rgba_unmultiplied(
-        palette.border.r(),
-        palette.border.g(),
-        palette.border.b(),
-        120,
-    );
-    let active_border = palette.accent;
-    let border_color = Palette::interpolate_color(base_border, active_border, hov_anim);
+    let resting_border = Palette::with_alpha(palette.border, 75);
+    let hovered_border = Palette::with_alpha(palette.accent, 200);
+    let border_color = Palette::interpolate_color(resting_border, hovered_border, hov_anim);
 
-    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(6),
-        Stroke::new(1.0 + 0.3 * hov_anim, border_color),
+        CornerRadius::same(8),
+        Stroke::new(1.0 + 0.2 * hov_anim, border_color),
         egui::StrokeKind::Outside,
     );
 
     let text_color = Palette::interpolate_color(Color32::from_gray(215), Color32::WHITE, hov_anim);
+    let y_lift = -hov_anim * 0.75;
+    let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
     ui.painter().text(
-        rect.center(),
+        center,
         egui::Align2::CENTER_CENTER,
         label,
         FontId::proportional(12.0),
@@ -167,22 +218,23 @@ pub fn animated_primary_button(
     let hovered_bg = Palette::lighten(palette.accent, 30, 255);
     let bg = Palette::interpolate_color(base_bg, hovered_bg, hov_anim);
 
-    let border_color = Palette::interpolate_color(
-        Palette::with_alpha(palette.accent, 160),
-        Color32::WHITE,
-        hov_anim * 0.4,
-    );
+    let resting_border = Palette::with_alpha(palette.accent, 160);
+    let hovered_border = Color32::WHITE;
+    let border_color = Palette::interpolate_color(resting_border, hovered_border, hov_anim * 0.5);
 
-    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(6),
+        CornerRadius::same(8),
         Stroke::new(1.0 + 0.3 * hov_anim, border_color),
         egui::StrokeKind::Outside,
     );
 
+    let y_lift = -hov_anim * 0.75;
+    let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
     ui.painter().text(
-        rect.center(),
+        center,
         egui::Align2::CENTER_CENTER,
         label,
         FontId::proportional(12.0),
@@ -209,24 +261,27 @@ pub fn animated_danger_button(ui: &mut Ui, label: &str, min_size: egui::Vec2) ->
         rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
     }
 
-    let base_bg = Color32::from_rgba_unmultiplied(170, 25, 25, 230);
+    let base_bg = Color32::from_rgba_unmultiplied(160, 25, 25, 210);
     let hover_bg = Color32::from_rgba_unmultiplied(225, 38, 38, 255);
     let bg = Palette::interpolate_color(base_bg, hover_bg, hov_anim);
 
-    let base_border = Color32::from_rgba_unmultiplied(220, 38, 38, 160);
-    let hover_border = Color32::from_rgba_unmultiplied(252, 165, 165, 255);
-    let border_color = Palette::interpolate_color(base_border, hover_border, hov_anim);
+    let resting_border = Color32::from_rgba_unmultiplied(220, 38, 38, 120);
+    let hover_border = Color32::from_rgba_unmultiplied(254, 202, 202, 220);
+    let border_color = Palette::interpolate_color(resting_border, hover_border, hov_anim);
 
-    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(6),
-        Stroke::new(1.0 + 0.4 * hov_anim, border_color),
+        CornerRadius::same(8),
+        Stroke::new(1.0 + 0.3 * hov_anim, border_color),
         egui::StrokeKind::Outside,
     );
 
+    let y_lift = -hov_anim * 0.75;
+    let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
     ui.painter().text(
-        rect.center(),
+        center,
         egui::Align2::CENTER_CENTER,
         label,
         FontId::proportional(12.0),
@@ -271,10 +326,10 @@ pub fn animated_shortcut_badge(
             wave,
         );
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(6), pulse_bg);
+            .rect_filled(rect, CornerRadius::same(8), pulse_bg);
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(6),
+            CornerRadius::same(8),
             Stroke::new(1.4, Color32::WHITE),
             egui::StrokeKind::Outside,
         );
@@ -286,22 +341,22 @@ pub fn animated_shortcut_badge(
             Color32::WHITE,
         );
     } else {
-        let base_bg = Palette::with_alpha(palette.card, 220);
-        let hover_bg = Palette::lighten(palette.card, 40, 245);
+        let base_bg = Palette::with_alpha(palette.card, 180);
+        let hover_bg = Palette::lighten(palette.card, 30, 240);
         let bg = Palette::interpolate_color(base_bg, hover_bg, hov_anim);
 
         let base_border = if is_modified {
             palette.accent
         } else {
-            Palette::with_alpha(palette.border, 140)
+            Palette::with_alpha(palette.border, 75)
         };
         let hover_border = palette.accent;
         let border_color = Palette::interpolate_color(base_border, hover_border, hov_anim);
 
-        ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+        ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
         ui.painter().rect_stroke(
             rect,
-            CornerRadius::same(6),
+            CornerRadius::same(8),
             Stroke::new(1.0 + 0.3 * hov_anim, border_color),
             egui::StrokeKind::Outside,
         );
@@ -312,8 +367,11 @@ pub fn animated_shortcut_badge(
             Palette::interpolate_color(Color32::from_gray(210), Color32::WHITE, hov_anim)
         };
 
+        let y_lift = -hov_anim * 0.5;
+        let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
         ui.painter().text(
-            rect.center(),
+            center,
             egui::Align2::CENTER_CENTER,
             text,
             FontId::monospace(11.5),
@@ -326,36 +384,118 @@ pub fn animated_shortcut_badge(
 
 /// Renders a small animated revert/reset button.
 pub fn animated_revert_button(ui: &mut Ui, palette: &Palette) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), Sense::click());
+    let (mut rect, response) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), Sense::click());
     let is_hovered = response.hovered();
+    let is_pressed = response.is_pointer_button_down_on();
+
     let hov_anim = ui
         .ctx()
         .animate_bool_responsive(response.id.with("rev_hov"), is_hovered);
+    let press_anim = ui
+        .ctx()
+        .animate_bool_responsive(response.id.with("rev_press"), is_pressed);
 
-    let bg = Palette::interpolate_color(
-        Color32::TRANSPARENT,
-        Palette::with_alpha(palette.card, 200),
-        hov_anim,
-    );
-    let border = Palette::interpolate_color(Color32::TRANSPARENT, palette.border, hov_anim);
-
-    ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
-    if hov_anim > 0.05 {
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(4),
-            Stroke::new(1.0, border),
-            egui::StrokeKind::Outside,
-        );
+    if press_anim > 0.01 {
+        rect = rect.translate(egui::vec2(0.0, 1.0 * press_anim));
     }
 
-    let icon_color = Palette::interpolate_color(Color32::from_gray(160), Color32::WHITE, hov_anim);
+    let resting_bg = Palette::with_alpha(palette.card, 140);
+    let hovered_bg = Palette::with_alpha(palette.card, 220);
+    let bg = Palette::interpolate_color(resting_bg, hovered_bg, hov_anim);
+
+    let resting_border = Palette::with_alpha(palette.border, 75);
+    let hover_border = palette.accent;
+    let border_color = Palette::interpolate_color(resting_border, hover_border, hov_anim);
+
+    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(6),
+        Stroke::new(1.0 + 0.2 * hov_anim, border_color),
+        egui::StrokeKind::Outside,
+    );
+
+    let icon_color = Palette::interpolate_color(Color32::from_gray(180), Color32::WHITE, hov_anim);
+    let scale = 1.0 + (hov_anim * 0.1);
+    let font_size = (12.0 * scale).round();
+    let y_lift = -hov_anim * 0.5;
+
     ui.painter().text(
-        rect.center(),
+        egui::pos2(rect.center().x, rect.center().y + y_lift),
         egui::Align2::CENTER_CENTER,
         "↺",
-        FontId::proportional(12.0),
+        FontId::proportional(font_size),
         icon_color,
+    );
+
+    response
+}
+
+/// Renders a sleek, unboxed interactive status bar text item with subtle hover brightening.
+pub fn status_bar_item(
+    ui: &mut Ui,
+    icon: Option<(&str, Color32)>,
+    text: &str,
+    text_color: Color32,
+    font_monospace: bool,
+) -> egui::Response {
+    let font_id = if font_monospace {
+        FontId::monospace(11.0)
+    } else {
+        FontId::proportional(11.5)
+    };
+    let mut total_w = 4.0;
+    let mut ic_w = 0.0;
+    if let Some((ic, _)) = icon {
+        let ic_galley =
+            ui.painter()
+                .layout_no_wrap(ic.to_string(), FontId::proportional(11.0), Color32::WHITE);
+        ic_w = ic_galley.size().x;
+        total_w += ic_w + 4.0;
+    }
+    let text_galley =
+        ui.painter()
+            .layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE);
+    total_w += text_galley.size().x;
+
+    let item_size = egui::vec2(total_w.max(12.0), 18.0);
+    let (rect, response) = ui.allocate_exact_size(item_size, Sense::click());
+    let is_hovered = response.hovered();
+
+    let hov_anim = ui
+        .ctx()
+        .animate_bool_responsive(response.id.with("sbi_hov"), is_hovered);
+
+    let mut cur_x = rect.min.x + 2.0;
+
+    if let Some((ic, color)) = icon {
+        let final_ic_color = if hov_anim > 0.01 {
+            Palette::interpolate_color(color, Color32::WHITE, hov_anim * 0.5)
+        } else {
+            color
+        };
+        ui.painter().text(
+            egui::pos2(cur_x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            ic,
+            FontId::proportional(11.0),
+            final_ic_color,
+        );
+        cur_x += ic_w + 4.0;
+    }
+
+    let final_text_color = if hov_anim > 0.01 {
+        Palette::interpolate_color(text_color, Color32::WHITE, hov_anim)
+    } else {
+        text_color
+    };
+
+    ui.painter().text(
+        egui::pos2(cur_x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        font_id,
+        final_text_color,
     );
 
     response
@@ -379,41 +519,94 @@ pub fn icon_button(
     let act_anim = ui
         .ctx()
         .animate_bool_responsive(response.id.with("act"), is_active);
+    let is_close_type = icon == "✕" || icon == "×" || icon == "x";
 
-    let normal_bg =
-        Color32::from_rgba_unmultiplied(palette.card.r(), palette.card.g(), palette.card.b(), 180);
-    let active_bg = Color32::from_rgba_unmultiplied(
-        (palette.card.r() as u16 + 40).min(255) as u8,
-        (palette.card.g() as u16 + 30).min(255) as u8,
-        (palette.card.b() as u16 + 50).min(255) as u8,
-        240,
-    );
-    let hovered_bg = Color32::from_rgba_unmultiplied(
-        (palette.card.r() as u16 + 25).min(255) as u8,
-        (palette.card.g() as u16 + 25).min(255) as u8,
-        (palette.card.b() as u16 + 35).min(255) as u8,
-        210,
-    );
+    let (bg, stroke, text_color) = if is_close_type {
+        let normal_bg = Color32::from_rgba_unmultiplied(
+            palette.card.r(),
+            palette.card.g(),
+            palette.card.b(),
+            140,
+        );
+        let hover_bg = Color32::from_rgba_unmultiplied(239, 68, 68, 45);
+        let active_bg = Color32::from_rgba_unmultiplied(220, 38, 38, 110);
 
-    let bg = if act_anim > 0.01 {
-        Palette::interpolate_color(normal_bg, active_bg, act_anim)
+        let bg = if response.is_pointer_button_down_on() {
+            active_bg
+        } else if hov_anim > 0.01 {
+            Palette::interpolate_color(normal_bg, hover_bg, hov_anim)
+        } else {
+            normal_bg
+        };
+
+        let resting_border = Palette::with_alpha(palette.border, 75);
+        let hover_border = Color32::from_rgba_unmultiplied(248, 113, 113, (160.0 * hov_anim) as u8);
+        let border_color = if hov_anim > 0.01 {
+            Palette::interpolate_color(resting_border, hover_border, hov_anim)
+        } else {
+            resting_border
+        };
+        let stroke = Stroke::new(1.0, border_color);
+
+        let cross_color = if hov_anim > 0.01 {
+            Palette::interpolate_color(
+                Color32::from_gray(180),
+                Color32::from_rgb(254, 226, 226),
+                hov_anim,
+            )
+        } else {
+            Color32::from_gray(180)
+        };
+
+        (bg, stroke, cross_color)
     } else {
-        Palette::interpolate_color(normal_bg, hovered_bg, hov_anim)
-    };
+        let normal_bg = Color32::from_rgba_unmultiplied(
+            palette.card.r(),
+            palette.card.g(),
+            palette.card.b(),
+            180,
+        );
+        let active_bg = Color32::from_rgba_unmultiplied(
+            (palette.card.r() as u16 + 40).min(255) as u8,
+            (palette.card.g() as u16 + 30).min(255) as u8,
+            (palette.card.b() as u16 + 50).min(255) as u8,
+            240,
+        );
+        let hovered_bg = Color32::from_rgba_unmultiplied(
+            (palette.card.r() as u16 + 25).min(255) as u8,
+            (palette.card.g() as u16 + 25).min(255) as u8,
+            (palette.card.b() as u16 + 35).min(255) as u8,
+            210,
+        );
 
-    let stroke_alpha = (255.0 * act_anim.max(hov_anim * 0.5)) as u8;
-    let stroke = if stroke_alpha > 5 {
-        Stroke::new(
-            1.0 + 0.2 * act_anim,
-            Color32::from_rgba_unmultiplied(
-                palette.accent.r(),
-                palette.accent.g(),
-                palette.accent.b(),
-                stroke_alpha,
-            ),
-        )
-    } else {
-        Stroke::NONE
+        let bg = if act_anim > 0.01 {
+            Palette::interpolate_color(normal_bg, active_bg, act_anim)
+        } else {
+            Palette::interpolate_color(normal_bg, hovered_bg, hov_anim)
+        };
+
+        let resting_border = Palette::with_alpha(palette.border, 75);
+        let hovered_border = Palette::with_alpha(palette.border, 155);
+        let active_border = Palette::with_alpha(palette.accent, 185);
+
+        let border_color = if act_anim > 0.01 {
+            Palette::interpolate_color(resting_border, active_border, act_anim)
+        } else if hov_anim > 0.01 {
+            Palette::interpolate_color(resting_border, hovered_border, hov_anim)
+        } else {
+            resting_border
+        };
+        let stroke = Stroke::new(1.0 + 0.2 * act_anim, border_color);
+
+        let text_color = if is_active {
+            palette.accent
+        } else if hov_anim > 0.01 {
+            Palette::interpolate_color(Color32::from_gray(215), Color32::WHITE, hov_anim)
+        } else {
+            Color32::from_gray(215)
+        };
+
+        (bg, stroke, text_color)
     };
 
     ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
@@ -426,34 +619,47 @@ pub fn icon_button(
         );
     }
 
-    let text_color = Color32::WHITE;
-
-    if icon == "✕" || icon == "×" || icon == "x" {
-        // Render crisp anti-aliased vector cross lines instead of font glyphs
-        // preventing missing font glyph box '[]' rendering across all platforms and font configs
+    if is_close_type {
+        // Render crisp anti-aliased vector cross lines with smooth micro-rotation animation on hover
         let center = rect.center();
-        let half_cross = (font_size * 0.42).round().max(3.5);
+        let angle = hov_anim * 0.08_f32;
+        let half = (font_size * 0.38).round().max(3.0);
+
+        let cos = angle.cos();
+        let sin = angle.sin();
+
+        let p1 = egui::pos2(
+            center.x + (-half * cos - -half * sin),
+            center.y + (-half * sin + -half * cos),
+        );
+        let p2 = egui::pos2(
+            center.x + (half * cos - half * sin),
+            center.y + (half * sin + half * cos),
+        );
+        let p3 = egui::pos2(
+            center.x + (half * cos - -half * sin),
+            center.y + (half * sin + -half * cos),
+        );
+        let p4 = egui::pos2(
+            center.x + (-half * cos - half * sin),
+            center.y + (-half * sin + half * cos),
+        );
+
         let cross_stroke = Stroke::new(1.65_f32, text_color);
-        ui.painter().line_segment(
-            [
-                egui::pos2(center.x - half_cross, center.y - half_cross),
-                egui::pos2(center.x + half_cross, center.y + half_cross),
-            ],
-            cross_stroke,
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(center.x + half_cross, center.y - half_cross),
-                egui::pos2(center.x - half_cross, center.y + half_cross),
-            ],
-            cross_stroke,
-        );
+        ui.painter().line_segment([p1, p2], cross_stroke);
+        ui.painter().line_segment([p3, p4], cross_stroke);
     } else {
+        // Dynamic micro-scale and subtle lift on hover for all icon buttons
+        let scale = 1.0 + (hov_anim * 0.08);
+        let dynamic_font_size = (font_size * scale).round();
+        let y_lift = -hov_anim * 0.75;
+        let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
         ui.painter().text(
-            rect.center(),
+            center,
             egui::Align2::CENTER_CENTER,
             icon,
-            FontId::proportional(font_size),
+            FontId::proportional(dynamic_font_size),
             text_color,
         );
     }
@@ -461,22 +667,7 @@ pub fn icon_button(
     response
 }
 
-/// Renders a drawer close button ("Close ×").
+/// Renders a modern sleek drawer close icon button (×).
 pub fn close_button(ui: &mut Ui, palette: &Palette) -> egui::Response {
-    ui.add(
-        egui::Button::new(
-            RichText::new("Close  ×")
-                .font(FontId::proportional(12.5))
-                .color(Color32::WHITE),
-        )
-        .fill(Color32::from_rgba_unmultiplied(
-            palette.card.r(),
-            palette.card.g(),
-            palette.card.b(),
-            220,
-        ))
-        .stroke(Stroke::new(1.0_f32, palette.border))
-        .corner_radius(CornerRadius::same(8))
-        .min_size(egui::vec2(72.0, 28.0)),
-    )
+    icon_button(ui, "×", false, palette, 13.0, egui::vec2(28.0, 28.0)).on_hover_text("Close (Esc)")
 }
