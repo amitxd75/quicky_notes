@@ -48,16 +48,21 @@ if [ -f "${ICON_SRC}" ]; then
     cp -f "${ICON_SRC}" "${PIXMAP_DIR}/quicky.png"
 fi
 
-# Generate .desktop launcher entry with absolute executable paths
+# Install .desktop launcher entry with absolute executable paths
 DESKTOP_FILE="${DESKTOP_DIR}/quicky.desktop"
-echo "📄 Generating desktop launcher at ${DESKTOP_FILE}..."
+echo "📄 Installing desktop launcher at ${DESKTOP_FILE}..."
 
-cat > "${DESKTOP_FILE}" << EOF
+if [ -f "${ROOT_DIR}/assets/quicky.desktop" ]; then
+    sed "s|^Exec=quicky|Exec=${PREFIX_BIN}/quicky|" "${ROOT_DIR}/assets/quicky.desktop" > "${DESKTOP_FILE}"
+    sed -i "s|^TryExec=quicky|TryExec=${PREFIX_BIN}/quicky|" "${DESKTOP_FILE}"
+    echo "Path=${HOME}" >> "${DESKTOP_FILE}"
+else
+    cat > "${DESKTOP_FILE}" << EOF
 [Desktop Entry]
 Type=Application
 Name=Quicky Notes
 GenericName=Note Taking & Scratchpad
-Comment=Floating glassmorphism note widget and markdown editor for Wayland and Hyprland
+Comment=Floating glassmorphism note widget and code scratchpad for Linux
 TryExec=${PREFIX_BIN}/quicky
 Exec=${PREFIX_BIN}/quicky %F
 Icon=quicky
@@ -69,6 +74,7 @@ MimeType=text/plain;text/markdown;application/x-quickynote;inode/directory;
 Keywords=notes;markdown;editor;quicky;scratchpad;
 Path=${HOME}
 EOF
+fi
 
 chmod +x "${DESKTOP_FILE}"
 
