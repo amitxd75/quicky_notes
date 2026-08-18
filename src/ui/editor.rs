@@ -1082,7 +1082,7 @@ pub fn render_close_confirmation_modal(app: &mut QuickyNotesApp, ctx: &egui::Con
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let close_x = crate::components::button::icon_button(
                             ui,
-                            "✕",
+                            "×",
                             false,
                             &palette,
                             12.0,
@@ -1663,8 +1663,8 @@ fn render_plugin_bottom_panel(
                     if ui
                         .add(
                             egui::Button::new(
-                                RichText::new("✕")
-                                    .font(FontId::proportional(12.0))
+                                RichText::new("×")
+                                    .font(FontId::proportional(14.0))
                                     .color(palette.muted_text),
                             )
                             .frame(false),

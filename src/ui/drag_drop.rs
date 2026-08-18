@@ -166,58 +166,47 @@ pub fn safe_open_folder(path: &Path) -> bool {
     }
 }
 
-/// Safely runs a native desktop file selection command (Zenity with Kdialog fallback).
-fn run_native_dialog(zenity_args: &[&str], kdialog_args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("zenity")
-        .args(zenity_args)
-        .output()
-        .or_else(|_| {
-            std::process::Command::new("kdialog")
-                .args(kdialog_args)
-                .output()
-        });
-
-    if let Ok(out) = output
-        && out.status.success()
-    {
-        let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !path_str.is_empty() {
-            Some(path_str)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-/// Spawns a native file dialog (Zenity/Kdialog) on a background thread.
+/// Spawns a native file dialog via RFD on a background thread.
 ///
 /// Returns a `Receiver` that will yield the selected file path (or `None` on cancel).
 /// The UI thread remains responsive while the dialog is open.
 pub fn spawn_file_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = run_native_dialog(&["--file-selection"], &["--getopenfilename"]);
+        let result = rfd::FileDialog::new()
+            .set_title("Open Note or File")
+            .pick_file()
+            .map(|p| p.to_string_lossy().to_string());
         let _ = tx.send(result);
     });
     rx
 }
 
-/// Spawns a file dialog specifically filtered for images.
+/// Spawns a file dialog specifically filtered for images via RFD.
 pub fn spawn_image_dialog() -> mpsc::Receiver<Option<String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = run_native_dialog(
-            &[
-                "--file-selection",
-                "--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg",
-            ],
-            &[
-                "--getopenfilename",
-                "*.png *.jpg *.jpeg *.webp *.gif *.bmp *.svg",
-            ],
-        );
+        let result = rfd::FileDialog::new()
+            .set_title("Attach Image to Note")
+            .add_filter(
+                "Images",
+                &["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"],
+            )
+            .pick_file()
+            .map(|p| p.to_string_lossy().to_string());
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+/// Spawns a folder workspace picker dialog via RFD.
+pub fn spawn_folder_dialog() -> mpsc::Receiver<Option<String>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = rfd::FileDialog::new()
+            .set_title("Open Folder Workspace")
+            .pick_folder()
+            .map(|p| p.to_string_lossy().to_string());
         let _ = tx.send(result);
     });
     rx
@@ -371,19 +360,6 @@ pub fn poll_file_dialog(app: &mut QuickyNotesApp) {
     }
 }
 
-///// Spawns a native directory selection dialog (Zenity/Kdialog) on a background thread.
-pub fn spawn_folder_dialog() -> mpsc::Receiver<Option<String>> {
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let result = run_native_dialog(
-            &["--file-selection", "--directory"],
-            &["--getexistingdirectory"],
-        );
-        let _ = tx.send(result);
-    });
-    rx
-}
-
 /// Opens a native directory dialog to choose a folder workspace.
 pub fn open_folder_dialog(app: &mut QuickyNotesApp) {
     if app.folder_dialog_rx.is_some() {
@@ -525,18 +501,11 @@ pub fn spawn_export_dialog(
             .and_then(|u| u.document_dir().map(|d| d.join(&default_filename)))
             .unwrap_or_else(|| std::path::PathBuf::from(&default_filename));
 
-        let initial_str = initial_path.to_string_lossy().to_string();
-
-        let filename_arg = format!("--filename={}", initial_str);
-        let chosen_opt = run_native_dialog(
-            &[
-                "--file-selection",
-                "--save",
-                "--confirm-overwrite",
-                &filename_arg,
-            ],
-            &["--getsavefilename", &initial_str],
-        );
+        let chosen_opt = rfd::FileDialog::new()
+            .set_title("Export Note to Disk")
+            .set_file_name(&default_filename)
+            .save_file()
+            .map(|p| p.to_string_lossy().to_string());
 
         let target_path = match chosen_opt {
             Some(chosen) if !chosen.is_empty() => std::path::PathBuf::from(chosen),
@@ -648,17 +617,14 @@ pub fn export_settings(app: &mut QuickyNotesApp) {
     };
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = if let Some(path_str) = run_native_dialog(
-            &[
-                "--file-selection",
-                "--save",
-                "--confirm-overwrite",
-                "--filename=quicky_settings.json",
-                "--file-filter=JSON Config | *.json",
-            ],
-            &["--getsavefilename", "quicky_settings.json", "*.json"],
-        ) {
-            if let Err(e) = std::fs::write(&path_str, json_text) {
+        let result = if let Some(path) = rfd::FileDialog::new()
+            .set_title("Export Settings JSON")
+            .set_file_name("quicky_settings.json")
+            .add_filter("JSON Config", &["json"])
+            .save_file()
+        {
+            let path_str = path.to_string_lossy().to_string();
+            if let Err(e) = std::fs::write(&path, json_text) {
                 Err(format!("Save failed: {}", e))
             } else {
                 Ok(path_str)
@@ -679,11 +645,12 @@ pub fn import_settings(app: &mut QuickyNotesApp) {
     }
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = if let Some(path_str) = run_native_dialog(
-            &["--file-selection", "--file-filter=JSON Config | *.json"],
-            &["--getopenfilename", "*.json"],
-        ) {
-            match std::fs::read_to_string(&path_str) {
+        let result = if let Some(path) = rfd::FileDialog::new()
+            .set_title("Import Settings JSON")
+            .add_filter("JSON Config", &["json"])
+            .pick_file()
+        {
+            match std::fs::read_to_string(&path) {
                 Ok(json) => Ok(json),
                 Err(e) => Err(format!("Read failed: {}", e)),
             }

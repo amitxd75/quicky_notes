@@ -362,8 +362,8 @@ fn render_right_controls(
     ui: &mut Ui,
     palette: &theme::Palette,
 ) {
-    // 1. Close Window (✕) Button
-    let close_app_btn = button::icon_button(ui, "✕", false, palette, 13.0, WINDOW_CTRL_BTN_SIZE);
+    // 1. Close Window (×) Button
+    let close_app_btn = button::icon_button(ui, "×", false, palette, 13.0, WINDOW_CTRL_BTN_SIZE);
     if close_app_btn.on_hover_text("Close window").clicked() {
         app.is_closing = true;
         app.save_if_dirty();

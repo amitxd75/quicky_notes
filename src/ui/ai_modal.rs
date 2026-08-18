@@ -298,7 +298,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                 |ui| {
                                     let close_btn = button::icon_button(
                                         ui,
-                                        "✕",
+                                        "×",
                                         false,
                                         &palette,
                                         13.0,
