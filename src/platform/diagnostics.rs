@@ -1,5 +1,6 @@
 //! Lightweight cross-platform hardware acceleration and process resource diagnostics.
 
+#[cfg(not(windows))]
 use std::fs;
 use std::sync::Mutex;
 use std::time::Instant;

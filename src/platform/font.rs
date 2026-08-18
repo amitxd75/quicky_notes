@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 use std::collections::HashMap;
+#[cfg(not(windows))]
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
