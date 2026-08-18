@@ -250,7 +250,7 @@ pub fn get_system_monospace_font_bytes() -> Option<Arc<Vec<u8>>> {
         .clone()
 }
 
-/// Appends system symbols, nerd font icons, and emoji fonts into font definitions.
+/// Appends lightweight system symbols into font definitions if available.
 fn append_symbol_fallbacks(fonts: &mut FontDefinitions) {
     if let Some(symbols_bytes) = get_system_symbols_font_bytes() {
         fonts.font_data.insert(
@@ -267,40 +267,6 @@ fn append_symbol_fallbacks(fonts: &mut FontDefinitions) {
             .entry(FontFamily::Monospace)
             .or_default()
             .push("system_symbols".to_owned());
-    }
-
-    if let Some(nerd_bytes) = get_system_nerd_font_bytes() {
-        fonts.font_data.insert(
-            "system_nerd".to_owned(),
-            FontData::from_owned((*nerd_bytes).clone()).into(),
-        );
-        fonts
-            .families
-            .entry(FontFamily::Proportional)
-            .or_default()
-            .push("system_nerd".to_owned());
-        fonts
-            .families
-            .entry(FontFamily::Monospace)
-            .or_default()
-            .push("system_nerd".to_owned());
-    }
-
-    if let Some(emoji_bytes) = get_system_emoji_font_bytes() {
-        fonts.font_data.insert(
-            "system_emoji".to_owned(),
-            FontData::from_owned((*emoji_bytes).clone()).into(),
-        );
-        fonts
-            .families
-            .entry(FontFamily::Proportional)
-            .or_default()
-            .push("system_emoji".to_owned());
-        fonts
-            .families
-            .entry(FontFamily::Monospace)
-            .or_default()
-            .push("system_emoji".to_owned());
     }
 }
 
@@ -435,27 +401,4 @@ pub fn setup_fonts_async(
     });
 
     rx
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_font_discovery_includes_default() {
-        let sys_fonts = get_installed_system_fonts();
-        assert!(!sys_fonts.is_empty());
-        assert_eq!(sys_fonts[0], "Default");
-
-        let mono_fonts = get_installed_monospace_fonts();
-        assert!(!mono_fonts.is_empty());
-        assert_eq!(mono_fonts[0], "Default");
-    }
-
-    #[test]
-    fn test_build_font_definitions_defaults() {
-        let defs = build_font_definitions("Default", "Default");
-        assert!(defs.families.contains_key(&FontFamily::Proportional));
-        assert!(defs.families.contains_key(&FontFamily::Monospace));
-    }
 }

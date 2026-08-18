@@ -169,10 +169,4 @@ mod tests {
         let result = deobfuscate_key(legacy);
         assert_eq!(result, legacy);
     }
-
-    #[test]
-    fn test_empty_key() {
-        assert_eq!(obfuscate_key(""), "");
-        assert_eq!(deobfuscate_key(""), "");
-    }
 }

@@ -24,13 +24,33 @@ pub const TERMINAL_CANDIDATES: &[&str] = &[
 ];
 
 /// System integration proxy exposed to Rhai scripts as `system`.
-#[derive(Debug, Clone, Default)]
-pub struct SystemHandle;
+#[derive(Debug, Clone)]
+pub struct SystemHandle {
+    pub timeout_ms: u64,
+    pub max_output_bytes: usize,
+}
+
+impl Default for SystemHandle {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 2000,
+            max_output_bytes: MAX_EXEC_OUTPUT_BYTES,
+        }
+    }
+}
 
 impl SystemHandle {
-    /// Creates a new system handle instance.
+    /// Creates a new system handle instance with default limits.
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Creates a new system handle with custom timeout and buffer limits.
+    pub fn with_config(timeout_ms: u64, max_output_bytes: usize) -> Self {
+        Self {
+            timeout_ms: timeout_ms.clamp(500, 30_000),
+            max_output_bytes: max_output_bytes.clamp(64_000, 10_485_760),
+        }
     }
 
     /// Auto-detects and launches an installed terminal emulator in the target directory.
@@ -77,7 +97,7 @@ impl SystemHandle {
             .is_ok()
     }
 
-    /// Executes a command synchronously, capturing stdout up to 1MB (enforces 2s timeout and child kill).
+    /// Executes a command synchronously, capturing stdout up to max_output_bytes (enforces timeout and child kill).
     pub fn exec_sync(&mut self, command: String, args: rhai::Array) -> String {
         let cmd = command.trim();
         if cmd.is_empty() {
@@ -104,7 +124,7 @@ impl SystemHandle {
         let child_arc = Arc::new(Mutex::new(Some(child)));
         let child_clone = Arc::clone(&child_arc);
 
-        let timeout_duration = std::time::Duration::from_millis(2000);
+        let timeout_duration = std::time::Duration::from_millis(self.timeout_ms);
         let (done_tx, done_rx) = std::sync::mpsc::channel();
 
         // Supervisor thread to kill child on timeout
@@ -121,6 +141,7 @@ impl SystemHandle {
         // Worker thread to read bounded stdout
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         let child_worker = Arc::clone(&child_arc);
+        let max_bytes = self.max_output_bytes;
 
         std::thread::spawn(move || {
             let mut buf = Vec::new();
@@ -133,10 +154,7 @@ impl SystemHandle {
 
             if let Some(mut stream) = stdout_opt {
                 use std::io::Read;
-                let _ = stream
-                    .by_ref()
-                    .take(MAX_EXEC_OUTPUT_BYTES as u64)
-                    .read_to_end(&mut buf);
+                let _ = stream.by_ref().take(max_bytes as u64).read_to_end(&mut buf);
             }
 
             if let Ok(mut guard) = child_worker.lock()

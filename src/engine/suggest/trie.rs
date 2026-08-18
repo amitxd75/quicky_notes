@@ -51,12 +51,16 @@ impl RadixNode {
         }
     }
 
-    /// Computes the composite priority score for this node.
-    ///
-    /// User-reinforced words receive a multiplier over standard dictionary base weights.
+    /// Computes the composite priority score for this node with default multiplier.
     #[inline]
     pub fn score(&self) -> u64 {
-        (self.user_weight as u64) * USER_WEIGHT_MULTIPLIER + (self.base_weight as u64)
+        self.score_with_multiplier(USER_WEIGHT_MULTIPLIER)
+    }
+
+    /// Computes the composite priority score for this node with a custom user weight multiplier.
+    #[inline]
+    pub fn score_with_multiplier(&self, multiplier: u64) -> u64 {
+        (self.user_weight as u64) * multiplier + (self.base_weight as u64)
     }
 
     /// Inserts a word and its associated weights into this branch of the Radix Trie.
@@ -135,6 +139,15 @@ impl RadixNode {
             }
         }
     }
+
+    /// Recursively trims capacity across all child node strings and vectors.
+    pub fn shrink_to_fit(&mut self) {
+        self.edge.shrink_to_fit();
+        self.children.shrink_to_fit();
+        for child in &mut self.children {
+            child.shrink_to_fit();
+        }
+    }
 }
 
 /// Computes the matching byte prefix length between two UTF-8 string slices.
@@ -157,26 +170,36 @@ pub struct RadixTrie {
 }
 
 impl RadixTrie {
-    /// Constructs a new `RadixTrie` and loads the embedded binary dictionary asset.
+    /// Constructs a new `RadixTrie` and loads the embedded binary dictionary asset with default capacity (50,000 words).
     pub fn new_with_embedded() -> Self {
+        Self::new_with_embedded_limit(50_000)
+    }
+
+    /// Constructs a new `RadixTrie` and loads up to `max_words` from the embedded binary dictionary.
+    pub fn new_with_embedded_limit(max_words: usize) -> Self {
         let mut trie = Self::default();
-        trie.load_binary(EMBEDDED_WORDS_BIN);
+        trie.load_binary_with_limit(EMBEDDED_WORDS_BIN, max_words);
         trie
     }
 
-    /// Parses binary-packed dictionary bytes into the Radix Trie.
+    /// Parses binary-packed dictionary bytes into the Radix Trie with default limit.
+    pub fn load_binary(&mut self, data: &[u8]) {
+        self.load_binary_with_limit(data, 50_000);
+    }
+
+    /// Parses binary-packed dictionary bytes into the Radix Trie up to `max_words`.
     ///
     /// # Binary Layout Format
     /// - `[0..4]`: Magic bytes (`"QNW1"`).
     /// - `[4..]`: Sequence of `[u8 length][UTF-8 word][u16 little-endian weight]`.
-    pub fn load_binary(&mut self, data: &[u8]) {
+    pub fn load_binary_with_limit(&mut self, data: &[u8], max_words: usize) {
         if data.len() < 4 || &data[0..4] != MAGIC_BYTES {
             return;
         }
 
         let mut idx = 4;
         let mut count = 0;
-        while idx < data.len() {
+        while idx < data.len() && count < max_words {
             let len = data[idx] as usize;
             idx += 1;
 
@@ -192,6 +215,7 @@ impl RadixTrie {
 
             idx += len + 2;
         }
+        self.root.shrink_to_fit();
         self.word_count += count;
     }
 
@@ -211,12 +235,18 @@ impl RadixTrie {
         }
     }
 
-    /// Searches the Radix Trie for the highest-scoring completion suffix matching `clean_prefix`.
-    ///
-    /// # Returns
-    /// - `Some(suffix)`: The remaining letters needed to complete the highest-ranked candidate word.
-    /// - `None`: If no candidate exists or the prefix already has higher score than any child completion.
+    /// Searches the Radix Trie for the highest-scoring completion suffix matching `clean_prefix` using default search parameters.
     pub fn suggest_suffix(&self, clean_prefix: &str) -> Option<String> {
+        self.suggest_suffix_with_config(clean_prefix, MAX_SEARCH_DEPTH, USER_WEIGHT_MULTIPLIER)
+    }
+
+    /// Searches the Radix Trie with custom search depth and user frequency weight multiplier.
+    pub fn suggest_suffix_with_config(
+        &self,
+        clean_prefix: &str,
+        max_depth: usize,
+        multiplier: u64,
+    ) -> Option<String> {
         let lower_prefix = clean_prefix.to_lowercase();
         let mut curr = &self.root;
         let mut rem_prefix = lower_prefix.as_str();
@@ -233,27 +263,23 @@ impl RadixTrie {
                 let mut best_suffix = None;
                 let mut path_buf = child.edge[common_len..].to_string();
 
-                // If this node completes a word:
-                // - If path_buf is non-empty (e.g. prefix "he", edge "help" -> path_buf "lp"),
-                //   then "help" is the candidate with initial score.
-                // - If path_buf is empty (e.g. prefix "is", edge "is" -> path_buf ""),
-                //   then "is" is the exact word. We anchor best_score to "is"'s score so children
-                //   (like "isn't" or "island") will only be suggested if they rank HIGHER than "is"!
                 let mut best_score = if child.is_word {
                     if !path_buf.is_empty() {
                         best_suffix = Some(path_buf.clone());
                     }
-                    child.score()
+                    child.score_with_multiplier(multiplier)
                 } else {
                     0
                 };
 
-                self.find_best_candidate(
+                self.find_best_candidate_with_config(
                     child,
                     &mut path_buf,
                     0,
                     &mut best_suffix,
                     &mut best_score,
+                    max_depth,
+                    multiplier,
                 );
 
                 let suffix = best_suffix?;
@@ -272,16 +298,19 @@ impl RadixTrie {
         None
     }
 
-    /// Recursively explores child branches to find the highest-scoring candidate completion.
-    fn find_best_candidate(
+    /// Recursively explores child branches with custom depth limit and weight multiplier.
+    #[allow(clippy::too_many_arguments)]
+    fn find_best_candidate_with_config(
         &self,
         node: &RadixNode,
         current_path: &mut String,
         depth: usize,
         best_suffix: &mut Option<String>,
         best_score: &mut u64,
+        max_depth: usize,
+        multiplier: u64,
     ) {
-        if depth > MAX_SEARCH_DEPTH {
+        if depth > max_depth {
             return;
         }
 
@@ -290,14 +319,22 @@ impl RadixTrie {
             current_path.push_str(&child.edge);
 
             if child.is_word {
-                let score = child.score();
+                let score = child.score_with_multiplier(multiplier);
                 if score > *best_score {
                     *best_score = score;
                     *best_suffix = Some(current_path.clone());
                 }
             }
 
-            self.find_best_candidate(child, current_path, depth + 1, best_suffix, best_score);
+            self.find_best_candidate_with_config(
+                child,
+                current_path,
+                depth + 1,
+                best_suffix,
+                best_score,
+                max_depth,
+                multiplier,
+            );
             current_path.truncate(prev_len);
         }
     }
@@ -310,18 +347,9 @@ mod tests {
     #[test]
     fn test_radix_trie_embedded_lookup() {
         let trie = RadixTrie::new_with_embedded();
-        assert!(trie.word_count > 100_000);
-        let res = trie.suggest_suffix("somet");
-        assert!(
-            res == Some("hing".to_string())
-                || res == Some("imes".to_string())
-                || res == Some("ime".to_string()),
-            "Expected 'hing' or 'imes' or 'ime', got {:?}",
-            res
-        );
-
-        let res_th = trie.suggest_suffix("someth");
-        assert_eq!(res_th, Some("ing".to_string()));
+        assert!(trie.word_count >= 25_000);
+        let res = trie.suggest_suffix("someth");
+        assert_eq!(res, Some("ing".to_string()));
     }
 
     #[test]

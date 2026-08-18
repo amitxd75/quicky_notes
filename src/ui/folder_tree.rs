@@ -38,8 +38,13 @@ pub struct FolderNode {
 }
 
 impl FolderNode {
-    /// Recursively scans a directory path up to `max_depth`.
+    /// Recursively scans filesystem path to construct FolderNode hierarchy with default depth limit.
     pub fn scan_path(path: &Path, depth: usize) -> Option<Self> {
+        Self::scan_path_with_depth(path, depth, MAX_SCAN_DEPTH)
+    }
+
+    /// Recursively scans filesystem path to construct FolderNode hierarchy with configurable depth limit.
+    pub fn scan_path_with_depth(path: &Path, depth: usize, max_depth: usize) -> Option<Self> {
         let name = path
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -65,7 +70,7 @@ impl FolderNode {
 
         let mut children = Vec::new();
 
-        if depth < MAX_SCAN_DEPTH
+        if depth < max_depth
             && let Ok(entries) = fs::read_dir(path)
         {
             let mut dir_entries = Vec::new();
@@ -80,7 +85,9 @@ impl FolderNode {
                     continue;
                 }
 
-                if let Some(child_node) = Self::scan_path(&entry_path, depth + 1) {
+                if let Some(child_node) =
+                    Self::scan_path_with_depth(&entry_path, depth + 1, max_depth)
+                {
                     dir_entries.push(child_node);
                 }
             }
@@ -142,8 +149,13 @@ pub struct FolderWorkspace {
 }
 
 impl FolderWorkspace {
-    /// Opens a folder path, scans its directory tree, and initializes workspace state.
+    /// Opens a folder path, scans its directory tree with default depth, and initializes workspace state.
     pub fn open(path: &Path) -> Option<Self> {
+        Self::open_with_depth(path, MAX_SCAN_DEPTH)
+    }
+
+    /// Opens a folder path with configurable scan depth.
+    pub fn open_with_depth(path: &Path, max_depth: usize) -> Option<Self> {
         let canonical = fs::canonicalize(path)
             .ok()
             .unwrap_or_else(|| path.to_path_buf());
@@ -156,7 +168,7 @@ impl FolderWorkspace {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| canonical.to_string_lossy().to_string());
 
-        let root_node = FolderNode::scan_path(&canonical, 0)?;
+        let root_node = FolderNode::scan_path_with_depth(&canonical, 0, max_depth)?;
 
         let mut expanded_dirs = HashSet::new();
         expanded_dirs.insert(canonical.clone());
@@ -173,7 +185,12 @@ impl FolderWorkspace {
 
     /// Rescans directory tree from disk to refresh newly created/deleted files.
     pub fn refresh(&mut self) {
-        if let Some(new_root) = FolderNode::scan_path(&self.root_path, 0) {
+        self.refresh_with_depth(MAX_SCAN_DEPTH);
+    }
+
+    /// Rescans directory tree from disk with configurable depth.
+    pub fn refresh_with_depth(&mut self, max_depth: usize) {
+        if let Some(new_root) = FolderNode::scan_path_with_depth(&self.root_path, 0, max_depth) {
             self.root_node = new_root;
         }
     }
@@ -560,19 +577,6 @@ fn render_node_children(
                 toggled_path,
                 opened_file,
             );
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_scan_current_dir() {
-        let node = FolderNode::scan_path(Path::new("."), 0).expect("failed scan");
-        for child in &node.children {
-            println!("CHILD: {} is_dir={}", child.name, child.is_dir);
         }
     }
 }

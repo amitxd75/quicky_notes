@@ -26,25 +26,34 @@ pub struct SuggestionEngine {
 }
 
 impl SuggestionEngine {
-    /// Constructs a new `SuggestionEngine` initialized with the embedded dictionary.
+    /// Constructs a new `SuggestionEngine` initialized with the embedded dictionary (default 50,000 words).
     pub fn new() -> Self {
+        Self::new_with_limit(50_000)
+    }
+
+    /// Constructs a new `SuggestionEngine` with a custom base vocabulary word limit.
+    pub fn new_with_limit(max_words: usize) -> Self {
         Self {
-            trie: RadixTrie::new_with_embedded(),
+            trie: RadixTrie::new_with_embedded_limit(max_words),
             markov: MarkovLanguageModel::new(),
         }
     }
 
     /// Spawns a background worker thread to parse the dictionary and train on existing notes.
-    ///
-    /// # Invariants
-    /// - Non-blocking: returns an `mpsc::Receiver` immediately without freezing the UI thread.
-    /// - Guarantees all initial note texts are parsed into sentences and trained before sending.
     pub fn start_async_load(initial_texts: Vec<String>) -> std::sync::mpsc::Receiver<Self> {
+        Self::start_async_load_with_limit(initial_texts, 50_000)
+    }
+
+    /// Spawns a background worker thread to parse the dictionary up to `max_words` and train on existing notes.
+    pub fn start_async_load_with_limit(
+        initial_texts: Vec<String>,
+        max_words: usize,
+    ) -> std::sync::mpsc::Receiver<Self> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("quicky-suggest-loader".to_string())
             .spawn(move || {
-                let mut engine = Self::new();
+                let mut engine = Self::new_with_limit(max_words);
                 for text in initial_texts {
                     engine.learn_text(&text);
                 }
@@ -52,6 +61,18 @@ impl SuggestionEngine {
             })
             .expect("Failed to spawn suggestion loader thread");
         rx
+    }
+
+    /// Reloads the base Radix Trie dictionary with a new word limit and retrains on provided note texts.
+    pub fn reload_with_limit<'a, I>(&mut self, max_words: usize, note_contents: I)
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        self.trie = RadixTrie::new_with_embedded_limit(max_words);
+        self.markov = MarkovLanguageModel::new();
+        for content in note_contents {
+            self.learn_text(content);
+        }
     }
 
     /// Returns the total count of unique words loaded in the Radix Trie.
@@ -108,22 +129,33 @@ impl SuggestionEngine {
         }
     }
 
-    /// Performs context-aware prediction: suggests the best completion suffix for `prefix` given `context_before`.
-    ///
-    /// # Resolution Pipeline
-    /// 1. **Prefix Length Filter**: Requires at least 2 characters to eliminate distracting single-letter ghost popups.
-    /// 2. **Complete Word Guard**: If `clean_prefix` is already an exact complete word (Trie returns `None`),
-    ///    no compound suffixes are suggested (e.g. `"is"` will never suggest `"nt"`, `"so"` will never suggest `"ft"`).
-    /// 3. **Markov Model (Trigram / Bigram)**: If preceding context exists, checks transition probabilities.
-    /// 4. **Radix Trie (Unigrams)**: Fallback to highest-scoring unigram candidate.
+    /// Performs context-aware prediction with default search parameters.
     pub fn suggest_with_context(&self, context_before: &str, prefix: &str) -> Option<String> {
+        self.suggest_with_context_and_config(
+            context_before,
+            prefix,
+            crate::engine::suggest::trie::MAX_SEARCH_DEPTH,
+            crate::engine::suggest::trie::USER_WEIGHT_MULTIPLIER,
+        )
+    }
+
+    /// Performs context-aware prediction with custom Trie depth and frequency multiplier.
+    pub fn suggest_with_context_and_config(
+        &self,
+        context_before: &str,
+        prefix: &str,
+        max_depth: usize,
+        multiplier: u64,
+    ) -> Option<String> {
         let clean_prefix = prefix.trim();
         if clean_prefix.len() < 2 {
             return None;
         }
 
         // Query Radix Trie unigrams first (anchored to complete word scores)
-        let trie_suffix = self.trie.suggest_suffix(clean_prefix)?;
+        let trie_suffix =
+            self.trie
+                .suggest_suffix_with_config(clean_prefix, max_depth, multiplier)?;
 
         let (w_minus_2, w_minus_1) = extract_preceding_words(context_before);
 
@@ -153,7 +185,7 @@ mod tests {
     #[test]
     fn test_embedded_dictionary_loading() {
         let engine = SuggestionEngine::new();
-        assert!(engine.word_count() > 100_000);
+        assert!(engine.word_count() >= 25_000);
         let res = engine.suggest_suffix("someth");
         assert_eq!(res, Some("ing".to_string()));
     }

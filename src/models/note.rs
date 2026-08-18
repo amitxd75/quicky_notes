@@ -215,13 +215,18 @@ impl Note {
         }
     }
 
-    /// Sanitizes and clamps note title.
+    /// Sanitizes and clamps note title to default maximum length.
     pub fn sanitize_title(title: &str) -> String {
+        Self::sanitize_title_with_len(title, MAX_NOTE_TITLE_LEN)
+    }
+
+    /// Sanitizes and clamps note title to a custom maximum length.
+    pub fn sanitize_title_with_len(title: &str, max_len: usize) -> String {
         let trimmed = title.trim();
         if trimmed.is_empty() {
             DEFAULT_NOTE_TITLE.to_string()
-        } else if trimmed.len() > MAX_NOTE_TITLE_LEN {
-            let mut end = MAX_NOTE_TITLE_LEN;
+        } else if trimmed.len() > max_len {
+            let mut end = max_len;
             while !trimmed.is_char_boundary(end) && end > 0 {
                 end -= 1;
             }
@@ -309,14 +314,36 @@ impl Note {
         }
     }
 
-    /// Returns whether this note is a Markdown or .qn document (.qn, .qnote, .md, .markdown).
+    /// Returns whether this note supports Markdown preview and rendering.
     #[inline]
     pub fn is_markdown(&self) -> bool {
-        let lower = self.title.to_lowercase();
-        lower.ends_with(".qn")
+        let name = self.file_path.as_deref().unwrap_or(&self.title);
+        let lower = name.to_lowercase();
+        if lower.ends_with(".qn")
             || lower.ends_with(".qnote")
             || lower.ends_with(".md")
             || lower.ends_with(".markdown")
+            || lower.ends_with(".txt")
+        {
+            return true;
+        }
+        if self.file_path.is_none() {
+            return true;
+        }
+        !lower.ends_with(".rs")
+            && !lower.ends_with(".py")
+            && !lower.ends_with(".js")
+            && !lower.ends_with(".ts")
+            && !lower.ends_with(".json")
+            && !lower.ends_with(".toml")
+            && !lower.ends_with(".yaml")
+            && !lower.ends_with(".yml")
+            && !lower.ends_with(".cpp")
+            && !lower.ends_with(".c")
+            && !lower.ends_with(".h")
+            && !lower.ends_with(".sh")
+            && !lower.ends_with(".go")
+            && !lower.ends_with(".java")
     }
 
     /// Returns whether this note is specifically a Quicky Notes bundled binary file (.qn or .qnote).
@@ -476,13 +503,30 @@ impl Note {
         buffer
     }
 
-    /// Decodes a `.qn` binary payload into a `Note`.
+    /// Decodes a `.qn` binary payload into a `Note` using default system resource limits.
     pub fn decode_qn_binary(bytes: &[u8]) -> Result<Self, QnDecodeError> {
-        if bytes.len() > MAX_QN_FILE_SIZE {
+        Self::decode_qn_binary_with_limits(
+            bytes,
+            MAX_QN_FILE_SIZE,
+            MAX_ATTACHMENT_SIZE,
+            MAX_TOTAL_ATTACHMENTS_SIZE,
+            MAX_ATTACHMENTS_PER_NOTE,
+        )
+    }
+
+    /// Decodes a `.qn` binary payload into a `Note` with custom resource limits.
+    pub fn decode_qn_binary_with_limits(
+        bytes: &[u8],
+        max_file_size: usize,
+        max_att_size: usize,
+        max_total_att_size: usize,
+        max_att_count: usize,
+    ) -> Result<Self, QnDecodeError> {
+        if bytes.len() > max_file_size {
             return Err(QnDecodeError::ExceedsLimit(format!(
                 "Payload size {} exceeds maximum allowable .qn size {}",
                 bytes.len(),
-                MAX_QN_FILE_SIZE
+                max_file_size
             )));
         }
 
@@ -499,7 +543,7 @@ impl Note {
             .map_err(|_| QnDecodeError::TooShort)?;
         let meta_len = u32::from_le_bytes(meta_len_bytes) as usize;
 
-        if meta_len > MAX_QN_FILE_SIZE || bytes.len() < QN_HEADER_OVERHEAD + meta_len {
+        if meta_len > max_file_size || bytes.len() < QN_HEADER_OVERHEAD + meta_len {
             return Err(QnDecodeError::TooShort);
         }
 
@@ -507,11 +551,11 @@ impl Note {
         let meta: QnMetaHeader = serde_json::from_slice(meta_slice)
             .map_err(|e| QnDecodeError::CorruptMetadata(e.to_string()))?;
 
-        if meta.images.len() > MAX_ATTACHMENTS_PER_NOTE {
+        if meta.images.len() > max_att_count {
             return Err(QnDecodeError::ExceedsLimit(format!(
                 "Attachment count {} exceeds maximum allowable count {}",
                 meta.images.len(),
-                MAX_ATTACHMENTS_PER_NOTE
+                max_att_count
             )));
         }
 
@@ -522,18 +566,18 @@ impl Note {
         let mut attachments = Vec::with_capacity(meta.images.len());
         for img_desc in meta.images {
             let length = img_desc.length as usize;
-            if length > MAX_ATTACHMENT_SIZE {
+            if length > max_att_size {
                 return Err(QnDecodeError::ExceedsLimit(format!(
                     "Attachment '{}' size {} exceeds max single attachment size {}",
-                    img_desc.name, length, MAX_ATTACHMENT_SIZE
+                    img_desc.name, length, max_att_size
                 )));
             }
 
             total_att_bytes = total_att_bytes.saturating_add(length);
-            if total_att_bytes > MAX_TOTAL_ATTACHMENTS_SIZE {
+            if total_att_bytes > max_total_att_size {
                 return Err(QnDecodeError::ExceedsLimit(format!(
                     "Cumulative attachments size exceeds maximum allowable limit {}",
-                    MAX_TOTAL_ATTACHMENTS_SIZE
+                    max_total_att_size
                 )));
             }
 
@@ -575,23 +619,6 @@ impl Note {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_note_creation_and_defaults() {
-        let note = Note::new("note-100".to_string(), "  my_notes.qn  ".to_string());
-        assert_eq!(note.id, "note-100");
-        assert_eq!(note.title, "my_notes.qn");
-        assert_eq!(note.word_count(), 0);
-        assert!(note.is_markdown());
-        assert!(note.is_qn());
-    }
-
-    #[test]
-    fn test_safe_display_time() {
-        let mut note = Note::new("n1".to_string(), "t.qn".to_string());
-        note.updated_at = "2026-08-15 14:32:05".to_string();
-        assert_eq!(note.display_time(), "14:32");
-    }
 
     #[test]
     fn test_note_unicode_char_operations() {

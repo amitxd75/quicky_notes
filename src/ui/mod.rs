@@ -9,7 +9,8 @@ pub mod header;
 pub mod image_view;
 pub mod markdown;
 
-pub mod options_drawer;
+pub mod options;
+pub use options as options_drawer;
 pub mod search_drawer;
 pub mod shortcuts;
 pub mod syntax;

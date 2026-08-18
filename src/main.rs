@@ -73,6 +73,17 @@ fn main() -> Result<(), eframe::Error> {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
 
+    unsafe {
+        if data.settings.advanced.hardware_acceleration {
+            if std::env::var("WGPU_BACKEND").is_err() {
+                std::env::set_var("WGPU_BACKEND", "vulkan");
+            }
+        } else {
+            std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+            std::env::set_var("WGPU_BACKEND", "gl");
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()

@@ -187,9 +187,12 @@ impl QuickyNotesApp {
             &data.settings.editor.editor_font,
         );
 
-        // Pre-index existing notes and load dictionary asynchronously
+        // Pre-index existing notes and load dictionary asynchronously with user's configured base capacity
         let note_texts = data.notes.iter().map(|n| n.content.clone()).collect();
-        let suggest_rx = crate::suggest::SuggestionEngine::start_async_load(note_texts);
+        let suggest_rx = crate::suggest::SuggestionEngine::start_async_load_with_limit(
+            note_texts,
+            data.settings.advanced.suggest_vocab_size,
+        );
 
         // Initialize plugin subsystem with user's disabled settings
         let mut plugin_manager = crate::plugins::PluginManager::new();
@@ -788,8 +791,10 @@ impl QuickyNotesApp {
         ui::drag_drop::handle_dropped_files(self, ctx);
         ui::shortcuts::handle_keyboard_shortcuts(self, ctx);
 
-        // Compute active note stats once per frame
-        self.cached_active_stats = self.active_note().map_or((0, 0, 0), |n| n.compute_stats());
+        // Compute active note stats only when buffer is dirty or uninitialized
+        if self.is_dirty || self.cached_active_stats == (0, 0, 0) {
+            self.cached_active_stats = self.active_note().map_or((0, 0, 0), |n| n.compute_stats());
+        }
 
         // Defense-in-depth guard against zero auto_save_seconds
         if self.last_auto_save.elapsed()

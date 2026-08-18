@@ -269,10 +269,17 @@ pub fn open_path_into_app(app: &mut QuickyNotesApp, path: &Path) {
     }
 
     // Check overall file size limit before reading
+    let max_file_bytes = (app.data.settings.advanced.max_qn_file_size_mb * 1024 * 1024) as u64;
     if let Ok(meta) = std::fs::metadata(&canonical)
-        && meta.len() > crate::models::note::MAX_QN_FILE_SIZE as u64
+        && meta.len() > max_file_bytes
     {
-        app.show_toast("File exceeds maximum 25 MB size limit", ToastKind::Error);
+        app.show_toast(
+            format!(
+                "File exceeds maximum {} MB size limit",
+                app.data.settings.advanced.max_qn_file_size_mb
+            ),
+            ToastKind::Error,
+        );
         return;
     }
 
@@ -290,10 +297,21 @@ pub fn open_path_into_app(app: &mut QuickyNotesApp, path: &Path) {
     }
 
     // 4. .qn binary container
+    let max_file_sz = app.data.settings.advanced.max_qn_file_size_mb * 1024 * 1024;
+    let max_att_sz = app.data.settings.advanced.max_attachment_size_mb * 1024 * 1024;
+    let max_total_att_sz = app.data.settings.advanced.max_total_attachments_size_mb * 1024 * 1024;
+    let max_att_cnt = app.data.settings.advanced.max_attachments_per_note;
+
     if is_qn_path(&canonical)
         && let Ok(bytes) = std::fs::read(&canonical)
         && bytes.starts_with(QN_MAGIC)
-        && let Ok(mut note) = Note::decode_qn_binary(&bytes)
+        && let Ok(mut note) = Note::decode_qn_binary_with_limits(
+            &bytes,
+            max_file_sz,
+            max_att_sz,
+            max_total_att_sz,
+            max_att_cnt,
+        )
     {
         note.file_path = Some(path_str);
         note.last_disk_mtime = std::fs::metadata(&canonical)
@@ -416,23 +434,40 @@ pub fn attach_image_to_active_note_at_cursor(
     bytes: Vec<u8>,
     cursor_range: Option<(usize, usize)>,
 ) {
-    if bytes.len() > crate::models::note::MAX_ATTACHMENT_SIZE {
+    let max_att_bytes = app.data.settings.advanced.max_attachment_size_mb * 1024 * 1024;
+    let max_total_att_bytes =
+        app.data.settings.advanced.max_total_attachments_size_mb * 1024 * 1024;
+    let max_att_count = app.data.settings.advanced.max_attachments_per_note;
+
+    if bytes.len() > max_att_bytes {
         app.show_toast(
-            "Image exceeds maximum 10 MB attachment limit",
+            format!(
+                "Image exceeds maximum {} MB attachment limit",
+                app.data.settings.advanced.max_attachment_size_mb
+            ),
             ToastKind::Error,
         );
         return;
     }
 
     if let Some(note) = app.active_note_mut() {
-        if note.attachments.len() >= crate::models::note::MAX_ATTACHMENTS_PER_NOTE {
-            app.show_toast("Note attachment limit reached (max 50)", ToastKind::Error);
+        if note.attachments.len() >= max_att_count {
+            app.show_toast(
+                format!("Note attachment limit reached (max {})", max_att_count),
+                ToastKind::Error,
+            );
             return;
         }
 
         let total_size: usize = note.attachments.iter().map(|a| a.data.len()).sum();
-        if total_size + bytes.len() > crate::models::note::MAX_TOTAL_ATTACHMENTS_SIZE {
-            app.show_toast("Total attachments exceed 50 MB limit", ToastKind::Error);
+        if total_size + bytes.len() > max_total_att_bytes {
+            app.show_toast(
+                format!(
+                    "Total attachments exceed {} MB limit",
+                    app.data.settings.advanced.max_total_attachments_size_mb
+                ),
+                ToastKind::Error,
+            );
             return;
         }
 

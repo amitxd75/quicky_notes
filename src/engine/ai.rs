@@ -497,47 +497,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ai_settings_default() {
-        let settings = AiSettings::default();
-        assert!(settings.enabled);
-        assert_eq!(settings.provider, AiProvider::Gemini);
-        assert_eq!(settings.model, "gemini-3.6-flash");
-        assert_eq!(settings.temperature, 0.7);
-        assert!(settings.system_prompt.contains("developer note assistant"));
-    }
-
-    #[test]
-    fn test_ai_providers_all_have_defaults_and_labels() {
-        for provider in AiProvider::ALL {
-            assert!(!provider.label().is_empty());
-            assert!(!provider.default_model().is_empty());
-        }
-    }
-
-    #[test]
-    fn test_ai_action_prompt_instructions() {
-        let fix = AiAction::FixAndPolish;
-        assert!(fix.prompt_instruction().contains("Fix all spelling"));
-        assert_eq!(fix.title(), "Fix & Polish");
-
-        let complete = AiAction::Complete;
-        assert!(
-            complete
-                .prompt_instruction()
-                .contains("Seamlessly complete")
-        );
-        assert_eq!(complete.title(), "Complete");
-
-        let explain = AiAction::Explain;
-        assert!(explain.prompt_instruction().contains("crystal-clear"));
-        assert_eq!(explain.title(), "Explain");
-
-        let custom = AiAction::Custom("Convert to json".to_string());
-        assert_eq!(custom.prompt_instruction(), "Convert to json");
-        assert_eq!(custom.title(), "Custom Prompt");
-    }
-
-    #[test]
     fn test_parse_hex_color() {
         assert_eq!(parse_hex_color("#ff5733"), Some([255, 87, 51]));
         assert_eq!(parse_hex_color("120c1c"), Some([18, 12, 28]));

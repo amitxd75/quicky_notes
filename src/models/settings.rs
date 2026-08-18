@@ -325,7 +325,7 @@ impl Default for EditorSettings {
             confirm_close_tab: true,
             trim_trailing_whitespace: false,
             enable_ghost_text: true,
-            enable_syntax_highlighting: true,
+            enable_syntax_highlighting: false,
             auto_save_seconds: DEFAULT_AUTO_SAVE_SECS,
             default_extension: ".qn".to_string(),
         }
@@ -426,6 +426,138 @@ impl PluginSettings {
     }
 }
 
+/// Advanced resource limits, caching sizes, plugin engine budgets, and tunables.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdvancedSettings {
+    /// Maximum allowable .qn binary file container size in megabytes (1 ..= 200 MB).
+    pub max_qn_file_size_mb: usize,
+    /// Maximum allowable single attachment size in megabytes (1 ..= 100 MB).
+    pub max_attachment_size_mb: usize,
+    /// Maximum cumulative attachments size per note in megabytes (5 ..= 500 MB).
+    pub max_total_attachments_size_mb: usize,
+    /// Maximum number of attachments permitted per note (5 ..= 500).
+    pub max_attachments_per_note: usize,
+    /// Maximum length for note titles in characters (16 ..= 512).
+    pub max_note_title_len: usize,
+
+    /// Maximum GPU texture cache entry capacity before LRU eviction (8 ..= 512).
+    pub max_texture_cache_entries: usize,
+    /// Maximum allowable single image dimension width/height in pixels (1024 ..= 16384).
+    pub max_image_dimension: u32,
+    /// Maximum allowable image total pixel count (1_000_000 ..= 67_108_864).
+    pub max_image_pixels: u64,
+    /// Maximum popup width in pixels for image viewer overlays (200.0 ..= 1200.0).
+    pub image_popup_max_width: f32,
+    /// Whether GPU hardware acceleration is enabled (OpenGL / Vulkan / wgpu; requires app restart).
+    pub hardware_acceleration: bool,
+
+    /// Maximum execution operation quota for plugin scripts (10_000 ..= 10_000_000).
+    pub max_script_operations: u64,
+    /// Maximum recursive call stack depth for plugins (10 ..= 200).
+    pub max_script_call_levels: usize,
+    /// Maximum allocated string size in bytes in plugin scripts (100_000 ..= 50_000_000).
+    pub max_script_string_size: usize,
+    /// Maximum array element count in plugin scripts (1_000 ..= 1_000_000).
+    pub max_script_array_size: usize,
+    /// Maximum map entry count in plugin scripts (1_000 ..= 1_000_000).
+    pub max_script_map_size: usize,
+    /// Maximum subprocess synchronous execution timeout in milliseconds (500 ..= 30_000).
+    pub exec_timeout_ms: u64,
+    /// Maximum HTTP request timeout in seconds (1 ..= 30).
+    pub http_timeout_secs: u64,
+    /// Maximum captured stdout output in bytes for synchronous commands (64_000 ..= 10_485_760).
+    pub max_exec_output_bytes: usize,
+    /// Maximum HTTP response body size in bytes (100_000 ..= 50_000_000).
+    pub max_http_response_bytes: usize,
+
+    /// Duration in seconds that temporary status bar messages stay visible (1.0 ..= 10.0).
+    pub status_msg_duration_secs: f32,
+    /// Maximum recursive directory scan depth for folder workspaces (1 ..= 20).
+    pub folder_max_scan_depth: usize,
+    /// Maximum search depth for Trie autocomplete suggestions (3 ..= 30).
+    pub suggest_max_search_depth: usize,
+    /// User learned frequency weight multiplier for suggestions (1_000 ..= 1_000_000).
+    pub suggest_user_weight_multiplier: u64,
+    /// Base dictionary vocabulary capacity (10_000 ..= 333_304 words).
+    pub suggest_vocab_size: usize,
+}
+
+impl Default for AdvancedSettings {
+    fn default() -> Self {
+        Self {
+            max_qn_file_size_mb: 25,
+            max_attachment_size_mb: 10,
+            max_total_attachments_size_mb: 50,
+            max_attachments_per_note: 50,
+            max_note_title_len: 128,
+
+            max_texture_cache_entries: 64,
+            max_image_dimension: 8192,
+            max_image_pixels: 16_777_216,
+            image_popup_max_width: 380.0,
+            hardware_acceleration: true,
+
+            max_script_operations: 500_000,
+            max_script_call_levels: 50,
+            max_script_string_size: 5_000_000,
+            max_script_array_size: 100_000,
+            max_script_map_size: 100_000,
+            exec_timeout_ms: 2000,
+            http_timeout_secs: 3,
+            max_exec_output_bytes: 1_048_576,
+            max_http_response_bytes: 5_242_880,
+
+            status_msg_duration_secs: 3.5,
+            folder_max_scan_depth: 6,
+            suggest_max_search_depth: 12,
+            suggest_user_weight_multiplier: 100_000,
+            suggest_vocab_size: 50_000,
+        }
+    }
+}
+
+impl AdvancedSettings {
+    /// Validates and clamps all advanced parameters to safe bounds.
+    pub fn validate_and_clamp(&mut self) {
+        self.max_qn_file_size_mb = self.max_qn_file_size_mb.clamp(1, 200);
+        self.max_attachment_size_mb = self.max_attachment_size_mb.clamp(1, 100);
+        self.max_total_attachments_size_mb = self.max_total_attachments_size_mb.clamp(5, 500);
+        self.max_attachments_per_note = self.max_attachments_per_note.clamp(5, 500);
+        self.max_note_title_len = self.max_note_title_len.clamp(16, 512);
+
+        self.max_texture_cache_entries = self.max_texture_cache_entries.clamp(8, 512);
+        self.max_image_dimension = self.max_image_dimension.clamp(1024, 16384);
+        self.max_image_pixels = self.max_image_pixels.clamp(1_000_000, 67_108_864);
+        if self.image_popup_max_width.is_nan() {
+            self.image_popup_max_width = 380.0;
+        } else {
+            self.image_popup_max_width = self.image_popup_max_width.clamp(200.0, 1200.0);
+        }
+
+        self.max_script_operations = self.max_script_operations.clamp(10_000, 10_000_000);
+        self.max_script_call_levels = self.max_script_call_levels.clamp(10, 200);
+        self.max_script_string_size = self.max_script_string_size.clamp(100_000, 50_000_000);
+        self.max_script_array_size = self.max_script_array_size.clamp(1_000, 1_000_000);
+        self.max_script_map_size = self.max_script_map_size.clamp(1_000, 1_000_000);
+        self.exec_timeout_ms = self.exec_timeout_ms.clamp(500, 30_000);
+        self.http_timeout_secs = self.http_timeout_secs.clamp(1, 30);
+        self.max_exec_output_bytes = self.max_exec_output_bytes.clamp(64_000, 10_485_760);
+        self.max_http_response_bytes = self.max_http_response_bytes.clamp(100_000, 50_000_000);
+
+        if self.status_msg_duration_secs.is_nan() {
+            self.status_msg_duration_secs = 3.5;
+        } else {
+            self.status_msg_duration_secs = self.status_msg_duration_secs.clamp(1.0, 10.0);
+        }
+        self.folder_max_scan_depth = self.folder_max_scan_depth.clamp(1, 20);
+        self.suggest_max_search_depth = self.suggest_max_search_depth.clamp(3, 30);
+        self.suggest_user_weight_multiplier =
+            self.suggest_user_weight_multiplier.clamp(1_000, 1_000_000);
+        self.suggest_vocab_size = self.suggest_vocab_size.clamp(10_000, 333_304);
+    }
+}
+
 /// Global user settings configuration container.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -444,6 +576,8 @@ pub struct AppSettings {
     pub keybindings: crate::ui::shortcuts::KeyBindings,
     /// Plugin system and extension script settings.
     pub plugins: PluginSettings,
+    /// Advanced resource quotas, memory bounds, and engine tunables.
+    pub advanced: AdvancedSettings,
 }
 
 impl AppSettings {
@@ -454,6 +588,7 @@ impl AppSettings {
         self.editor.validate_and_clamp();
         self.window.validate_and_clamp();
         self.plugins.validate_and_clamp();
+        self.advanced.validate_and_clamp();
         self.keybindings.ensure_all_actions_present();
     }
 
@@ -577,5 +712,47 @@ mod tests {
             plugin_settings.disabled_plugins,
             vec!["formatter".to_string(), "terminal".to_string()]
         );
+    }
+
+    #[test]
+    fn test_advanced_settings_defaults_and_validation() {
+        let mut adv = AdvancedSettings::default();
+        assert_eq!(adv.max_qn_file_size_mb, 25);
+        assert_eq!(adv.max_attachment_size_mb, 10);
+        assert_eq!(adv.max_total_attachments_size_mb, 50);
+        assert_eq!(adv.max_attachments_per_note, 50);
+        assert_eq!(adv.max_note_title_len, 128);
+        assert_eq!(adv.max_texture_cache_entries, 64);
+        assert_eq!(adv.max_image_dimension, 8192);
+        assert_eq!(adv.max_image_pixels, 16_777_216);
+        assert_eq!(adv.max_script_operations, 500_000);
+        assert_eq!(adv.folder_max_scan_depth, 6);
+        assert!(adv.hardware_acceleration);
+        assert_eq!(adv.suggest_vocab_size, 50_000);
+
+        // Test out-of-range values get clamped
+        adv.max_qn_file_size_mb = 9999;
+        adv.max_attachment_size_mb = 0;
+        adv.max_total_attachments_size_mb = 0;
+        adv.max_attachments_per_note = 0;
+        adv.max_note_title_len = 5;
+        adv.max_texture_cache_entries = 0;
+        adv.max_image_dimension = 100;
+        adv.max_script_operations = 50;
+        adv.folder_max_scan_depth = 100;
+        adv.status_msg_duration_secs = 50.0;
+
+        adv.validate_and_clamp();
+
+        assert_eq!(adv.max_qn_file_size_mb, 200);
+        assert_eq!(adv.max_attachment_size_mb, 1);
+        assert_eq!(adv.max_total_attachments_size_mb, 5);
+        assert_eq!(adv.max_attachments_per_note, 5);
+        assert_eq!(adv.max_note_title_len, 16);
+        assert_eq!(adv.max_texture_cache_entries, 8);
+        assert_eq!(adv.max_image_dimension, 1024);
+        assert_eq!(adv.max_script_operations, 10_000);
+        assert_eq!(adv.folder_max_scan_depth, 20);
+        assert_eq!(adv.status_msg_duration_secs, 10.0);
     }
 }

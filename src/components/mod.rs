@@ -10,6 +10,7 @@ pub mod divider;
 pub mod input;
 pub mod modal;
 pub mod slider;
+pub mod stepper;
 pub mod toggle;
 
 pub use badge::*;
@@ -19,4 +20,5 @@ pub use divider::*;
 pub use input::*;
 pub use modal::*;
 pub use slider::*;
+pub use stepper::*;
 pub use toggle::*;

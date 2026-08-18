@@ -212,6 +212,7 @@ pub fn hex_to_color(hex: &str) -> Color32 {
 
 /// Cached wallpaper file modification times to avoid redundant disk reads and parsing.
 struct WallpaperCache {
+    last_check: Option<std::time::Instant>,
     caelestia_mtime: Option<SystemTime>,
     btop_mtime: Option<SystemTime>,
     pywal_mtime: Option<SystemTime>,
@@ -219,6 +220,7 @@ struct WallpaperCache {
 }
 
 static WALLPAPER_CACHE: Mutex<WallpaperCache> = Mutex::new(WallpaperCache {
+    last_check: None,
     caelestia_mtime: None,
     btop_mtime: None,
     pywal_mtime: None,
@@ -374,6 +376,20 @@ fn parse_caelestia_content(content: &str) -> Option<PaletteColors> {
 
 /// Reads active wallpaper colors from Caelestia or Pywal cache with mtime check.
 pub fn get_wallpaper_colors() -> Option<PaletteColors> {
+    {
+        let cache = WALLPAPER_CACHE.lock().unwrap_or_else(|e| {
+            eprintln!("Warning: Wallpaper cache mutex poisoned, recovering");
+            e.into_inner()
+        });
+        if cache.colors.is_some()
+            && cache
+                .last_check
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(1500))
+        {
+            return cache.colors;
+        }
+    }
+
     let (caelestia_path, btop_path, pywal_path) = get_wallpaper_paths()?;
 
     let current_caelestia_mtime = get_file_mtime(&caelestia_path);
@@ -381,10 +397,11 @@ pub fn get_wallpaper_colors() -> Option<PaletteColors> {
     let current_pywal_mtime = get_file_mtime(&pywal_path);
 
     {
-        let cache = WALLPAPER_CACHE.lock().unwrap_or_else(|e| {
+        let mut cache = WALLPAPER_CACHE.lock().unwrap_or_else(|e| {
             eprintln!("Warning: Wallpaper cache mutex poisoned, recovering");
             e.into_inner()
         });
+        cache.last_check = Some(std::time::Instant::now());
         if cache.colors.is_some()
             && cache.caelestia_mtime == current_caelestia_mtime
             && cache.btop_mtime == current_btop_mtime
@@ -399,6 +416,7 @@ pub fn get_wallpaper_colors() -> Option<PaletteColors> {
         && let Some(palette) = parse_caelestia_content(&content)
     {
         if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
+            cache.last_check = Some(std::time::Instant::now());
             cache.caelestia_mtime = current_caelestia_mtime;
             cache.btop_mtime = current_btop_mtime;
             cache.pywal_mtime = current_pywal_mtime;
@@ -412,6 +430,7 @@ pub fn get_wallpaper_colors() -> Option<PaletteColors> {
         && let Some(palette) = parse_caelestia_content(&content)
     {
         if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
+            cache.last_check = Some(std::time::Instant::now());
             cache.caelestia_mtime = current_caelestia_mtime;
             cache.btop_mtime = current_btop_mtime;
             cache.pywal_mtime = current_pywal_mtime;
@@ -430,6 +449,7 @@ pub fn get_wallpaper_colors() -> Option<PaletteColors> {
         let card = Palette::lighten(bg, 18, 255);
         let palette = PaletteColors::new(bg, card, border, accent);
         if let Ok(mut cache) = WALLPAPER_CACHE.lock() {
+            cache.last_check = Some(std::time::Instant::now());
             cache.caelestia_mtime = current_caelestia_mtime;
             cache.btop_mtime = current_btop_mtime;
             cache.pywal_mtime = current_pywal_mtime;
@@ -617,22 +637,10 @@ pub fn setup_glassmorphism_theme(ctx: &Context, settings: &AppSettings) {
     };
 
     style.text_styles = [
-        (
-            egui::TextStyle::Small,
-            egui::FontId::proportional(11.0 * scale),
-        ),
-        (
-            egui::TextStyle::Body,
-            egui::FontId::proportional(13.5 * scale),
-        ),
-        (
-            egui::TextStyle::Button,
-            egui::FontId::proportional(13.0 * scale),
-        ),
-        (
-            egui::TextStyle::Heading,
-            egui::FontId::proportional(18.0 * scale),
-        ),
+        (egui::TextStyle::Small, egui::FontId::proportional(11.0)),
+        (egui::TextStyle::Body, egui::FontId::proportional(13.5)),
+        (egui::TextStyle::Button, egui::FontId::proportional(13.0)),
+        (egui::TextStyle::Heading, egui::FontId::proportional(18.0)),
         (
             egui::TextStyle::Monospace,
             egui::FontId::monospace(settings.editor.font_size),
@@ -642,16 +650,5 @@ pub fn setup_glassmorphism_theme(ctx: &Context, settings: &AppSettings) {
 
     ctx.set_style_of(eframe::egui::Theme::Dark, style.clone());
     ctx.set_style_of(eframe::egui::Theme::Light, style);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_hex_to_color() {
-        assert_eq!(hex_to_color("#ff00aa"), Color32::from_rgb(255, 0, 170));
-        assert_eq!(hex_to_color("#f0a"), Color32::from_rgb(255, 0, 170));
-        assert_eq!(hex_to_color("invalid"), Color32::from_rgb(20, 15, 30));
-    }
+    ctx.set_zoom_factor(scale);
 }

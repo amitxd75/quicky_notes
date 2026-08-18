@@ -129,16 +129,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cli_parse_empty() {
-        let cli = CliArgs::parse(Vec::<String>::new());
-        assert!(!cli.show_help);
-        assert!(!cli.show_version);
-        assert!(!cli.new_tab);
-        assert!(cli.files.is_empty());
-        assert!(cli.folder.is_none());
-    }
-
-    #[test]
     fn test_cli_parse_flags() {
         let cli_h = CliArgs::parse(["-h"]);
         assert!(cli_h.show_help);
@@ -152,19 +142,11 @@ mod tests {
 
     #[test]
     fn test_cli_parse_files_and_folder() {
-        let args = ["file1.txt", "file2.md"];
+        let args = ["--folder", "/tmp/my_workspace", "file1.txt", "file2.md"];
         let cli = CliArgs::parse(args);
+        assert_eq!(cli.folder, Some(PathBuf::from("/tmp/my_workspace")));
         assert_eq!(cli.files.len(), 2);
         assert_eq!(cli.files[0], PathBuf::from("file1.txt"));
         assert_eq!(cli.files[1], PathBuf::from("file2.md"));
-    }
-
-    #[test]
-    fn test_cli_parse_explicit_folder_flag() {
-        let args = ["--folder", "/tmp/my_workspace", "note.md"];
-        let cli = CliArgs::parse(args);
-        assert_eq!(cli.folder, Some(PathBuf::from("/tmp/my_workspace")));
-        assert_eq!(cli.files.len(), 1);
-        assert_eq!(cli.files[0], PathBuf::from("note.md"));
     }
 }

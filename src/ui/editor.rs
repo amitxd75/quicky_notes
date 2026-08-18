@@ -230,11 +230,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                         FontId::proportional(font_size)
                     };
 
-                    let effective_mode = if note.is_markdown() {
-                        preview_mode
-                    } else {
-                        crate::app::MarkdownViewMode::Edit
-                    };
+                    let effective_mode = preview_mode;
 
                     let language = if enable_syntax {
                         crate::ui::syntax::detect_language(&note.title, note.file_path.as_deref())
@@ -254,6 +250,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                 .max_height(editor_height)
                                 .min_scrolled_height(editor_height)
                                 .show(ui, |ui| {
+                                    ui.set_min_height(editor_height);
                                     render_multiline_editor_pane(
                                         ui,
                                         note,
@@ -310,9 +307,8 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                             let r = ui.interact(
                                 preview_resp.inner_rect,
                                 egui::Id::new("preview_ctx_menu"),
-                                egui::Sense::click(),
+                                egui::Sense::hover(),
                             );
-
                             r.context_menu(|ui| {
                                 crate::ui::context_menu::render_editor_context_menu(
                                     ui,
@@ -327,12 +323,13 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
 
                         crate::app::MarkdownViewMode::Split => {
                             let total_width = ui.available_width();
-                            let sep_width = 12.0;
+                            let sep_width = 10.0;
                             let usable_width = (total_width - sep_width).max(100.0);
-                            let left_width = usable_width * *split_ratio;
-                            let right_width = usable_width - left_width;
+                            let left_width = (usable_width * *split_ratio).clamp(50.0, usable_width - 50.0);
+                            let right_width = (usable_width - left_width).max(50.0);
 
-                            ui.horizontal(|ui| {
+                            ui.horizontal_top(|ui| {
+                                // Left pane: Editor
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(left_width, editor_height),
                                     egui::Layout::top_down(egui::Align::LEFT),
@@ -343,6 +340,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                             .max_height(editor_height)
                                             .min_scrolled_height(editor_height)
                                             .show(ui, |ui| {
+                                                ui.set_min_height(editor_height);
                                                 render_multiline_editor_pane(
                                                     ui,
                                                     note,
@@ -395,50 +393,56 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                     Stroke::new(1.0, div_color),
                                 );
 
-                                let split_prev_resp = egui::ScrollArea::vertical()
-                                    .id_salt("split_preview_scroll_area")
-                                    .auto_shrink([false, false])
-                                    .max_height(editor_height)
-                                    .min_scrolled_height(editor_height)
-                                    .show(ui, |ui| {
-                                        ui.set_width(right_width);
-                                        ui.set_min_height(editor_height);
-                                        if note.content.trim().is_empty() {
-                                            ui.add_space(20.0);
-                                            ui.vertical_centered(|ui| {
-                                                ui.label(
-                                                    RichText::new("Split Preview is empty.")
-                                                        .font(FontId::proportional(14.0))
-                                                        .color(Color32::from_gray(130)),
-                                                );
+                                // Right pane: Preview
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(right_width, editor_height),
+                                    egui::Layout::top_down(egui::Align::LEFT),
+                                    |ui| {
+                                        let split_prev_resp = egui::ScrollArea::vertical()
+                                            .id_salt("split_preview_scroll_area")
+                                            .auto_shrink([false, false])
+                                            .max_height(editor_height)
+                                            .min_scrolled_height(editor_height)
+                                            .show(ui, |ui| {
+                                                ui.set_min_height(editor_height);
+                                                if note.content.trim().is_empty() {
+                                                    ui.add_space(20.0);
+                                                    ui.vertical_centered(|ui| {
+                                                        ui.label(
+                                                            RichText::new("Split Preview is empty.")
+                                                                .font(FontId::proportional(14.0))
+                                                                .color(Color32::from_gray(130)),
+                                                        );
+                                                    });
+                                                } else {
+                                                    crate::ui::markdown::render_markdown(
+                                                        ui,
+                                                        &note.content,
+                                                        font_size,
+                                                        is_monospace,
+                                                        &palette,
+                                                        Some(note),
+                                                    );
+                                                }
                                             });
-                                        } else {
-                                            crate::ui::markdown::render_markdown(
-                                                ui,
-                                                &note.content,
-                                                font_size,
-                                                is_monospace,
-                                                &palette,
-                                                Some(note),
-                                            );
-                                        }
-                                    });
 
-                                let r = ui.interact(
-                                    split_prev_resp.inner_rect,
-                                    egui::Id::new("split_preview_ctx_menu"),
-                                    egui::Sense::click(),
+                                        let r = ui.interact(
+                                            split_prev_resp.inner_rect,
+                                            egui::Id::new("split_preview_ctx_menu"),
+                                            egui::Sense::hover(),
+                                        );
+                                        r.context_menu(|ui| {
+                                            crate::ui::context_menu::render_editor_context_menu(
+                                                ui,
+                                                note,
+                                                *last_cursor_range,
+                                                &palette,
+                                                &plugin_menu_items,
+                                                &mut context_menu_action,
+                                            );
+                                        });
+                                    },
                                 );
-                                r.context_menu(|ui| {
-                                    crate::ui::context_menu::render_editor_context_menu(
-                                        ui,
-                                        note,
-                                        *last_cursor_range,
-                                        &palette,
-                                        &plugin_menu_items,
-                                        &mut context_menu_action,
-                                    );
-                                });
                             });
                         }
                     }
@@ -463,11 +467,15 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                     } else {
                                         &app.data.settings.editor.default_extension
                                     };
-                                    let mut truncated: String = clean_line.chars().take(24).collect();
+                                    let max_title_chars = app.data.settings.advanced.max_note_title_len.saturating_sub(6).max(12);
+                                    let mut truncated: String = clean_line.chars().take(max_title_chars).collect();
                                     if !truncated.ends_with(ext) {
                                         truncated.push_str(ext);
                                     }
-                                    note.title = crate::models::Note::sanitize_title(&truncated);
+                                    note.title = crate::models::Note::sanitize_title_with_len(
+                                        &truncated,
+                                        app.data.settings.advanced.max_note_title_len,
+                                    );
                                 }
                             }
                         }
@@ -506,7 +514,6 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                         bottom_panel_action = render_plugin_bottom_panel(
                             active_plugin_panel,
                             ui,
-                            editor_width,
                             panel_h,
                             &palette,
                         );
@@ -542,7 +549,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             BottomPanelAction::Copy(text) => {
                 crate::ui::context_menu::set_clipboard_text(&text);
                 app.show_toast(
-                    "Output copied to clipboard",
+                    "Console output copied to clipboard",
                     crate::ui::toast::ToastKind::Success,
                 );
             }
@@ -588,15 +595,20 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             }
             crate::ui::context_menu::ContextMenuAction::Copy => {
                 if let Some(note) = app.active_note() {
-                    let text = if let Some((start, end)) = cursor_range
+                    let (text, is_selection) = if let Some((start, end)) = cursor_range
                         && start < end
                     {
-                        note.char_slice(start, end)
+                        (note.char_slice(start, end), true)
                     } else {
-                        note.content.clone()
+                        (note.content.clone(), false)
                     };
                     crate::ui::context_menu::set_clipboard_text(&text);
-                    app.show_toast("Copied to clipboard", crate::ui::toast::ToastKind::Success);
+                    let toast_msg = if is_selection {
+                        "Selected text copied to clipboard"
+                    } else {
+                        "Note content copied to clipboard"
+                    };
+                    app.show_toast(toast_msg, crate::ui::toast::ToastKind::Success);
                 }
             }
             crate::ui::context_menu::ContextMenuAction::Paste => {
@@ -783,11 +795,13 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                                 .color(Color32::from_gray(100)),
                         );
 
+                        let status_duration = app.data.settings.advanced.status_msg_duration_secs;
+
                         // 3. Linked File indicator or Interactive Mode toggle
                         if let Some(ref path_str) = active_file_path {
                             let is_status_active =
                                 app.status_msg.as_ref().is_some_and(|(_, created)| {
-                                    created.elapsed().as_secs_f32() < STATUS_MSG_DURATION_SECS
+                                    created.elapsed().as_secs_f32() < status_duration
                                 });
                             let max_path_len = if is_status_active {
                                 14
@@ -885,11 +899,11 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         // 5. Transient Status Message Notification
                         if let Some((msg, created)) = &app.status_msg {
                             let elapsed = created.elapsed().as_secs_f32();
-                            if elapsed < STATUS_MSG_DURATION_SECS {
+                            if elapsed < status_duration {
                                 let fade = if elapsed < 0.2 {
                                     (elapsed / 0.2).clamp(0.0, 1.0)
-                                } else if elapsed > STATUS_MSG_DURATION_SECS - 0.7 {
-                                    ((STATUS_MSG_DURATION_SECS - elapsed) / 0.7).clamp(0.0, 1.0)
+                                } else if elapsed > status_duration - 0.7 {
+                                    ((status_duration - elapsed) / 0.7).clamp(0.0, 1.0)
                                 } else {
                                     1.0
                                 };
@@ -985,7 +999,7 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                             });
                         }
 
-                        // 3. Document Statistics (Responsive formatting + Click to copy)
+                        // 3. Document Statistics (Responsive formatting + Click to focus)
                         let (words, chars, lines) = app.cached_active_stats;
                         let stats_text = if is_ultra_compact {
                             format!("L: {} • W: {}", lines, words)
@@ -1005,19 +1019,11 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         );
 
                         let stats_tooltip = format!(
-                            "📊 Document Metrics:\n• Lines: {}\n• Words: {}\n• Characters: {}\n• Click to copy statistics to clipboard",
+                            "📊 Document Metrics:\n• Lines: {}\n• Words: {}\n• Characters: {}",
                             lines, words, chars
                         );
                         if stats_resp.on_hover_text(stats_tooltip).clicked() {
-                            let summary = format!(
-                                "Lines: {}, Words: {}, Characters: {}",
-                                lines, words, chars
-                            );
-                            ui.ctx().copy_text(summary);
-                            app.show_toast(
-                                "Stats copied to clipboard",
-                                crate::ui::toast::ToastKind::Success,
-                            );
+                            app.focus_editor = true;
                         }
                     },
                 );
@@ -1272,17 +1278,17 @@ fn render_multiline_editor_pane(
         0.0
     };
 
-    let (gutter_rect, output) = ui
+    let (gutter_rect, gutter_resp, output) = ui
         .horizontal_top(|ui| {
-            let g_rect = if show_line_numbers {
-                let (r, _) = ui.allocate_exact_size(
+            let (g_rect, g_resp) = if show_line_numbers {
+                let (r, resp) = ui.allocate_exact_size(
                     egui::vec2(gutter_width, min_editor_h),
-                    egui::Sense::hover(),
+                    egui::Sense::click_and_drag(),
                 );
                 ui.add_space(8.0);
-                Some(r)
+                (Some(r), Some(resp))
             } else {
-                None
+                (None, None)
             };
 
             let text_edit = egui::TextEdit::multiline(&mut note.content)
@@ -1294,11 +1300,33 @@ fn render_multiline_editor_pane(
                 .layouter(&mut layouter);
 
             let out = text_edit.show(ui);
-            (g_rect, out)
+            (g_rect, g_resp, out)
         })
         .inner;
 
     let resp = &output.response;
+
+    // Handle clicking or dragging anywhere on the line numbers gutter to focus editor and place cursor
+    if let Some(ref g_resp) = gutter_resp
+        && (g_resp.clicked()
+            || g_resp.dragged()
+            || (g_resp.hovered() && ui.input(|i| i.pointer.primary_clicked())))
+    {
+        output.response.request_focus();
+        if let Some(ptr_pos) = ui.input(|i| i.pointer.interact_pos()) {
+            let rel_pos = ptr_pos - output.galley_pos;
+            let cursor = output.galley.cursor_from_pos(rel_pos);
+            let char_idx: usize = cursor.index.into();
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), output.response.id)
+                .unwrap_or_else(|| output.state.clone());
+            state
+                .cursor
+                .set_char_range(Some(egui::text_selection::CCursorRange::one(cursor)));
+            state.store(ui.ctx(), output.response.id);
+            *last_cursor_range = Some((char_idx, char_idx));
+            ui.ctx().request_repaint();
+        }
+    }
 
     // Paint line numbers directly aligned with TextEdit visual rows (culling-aware, handles word wrapping flawlessly)
     if let Some(gutter_r) = gutter_rect {
@@ -1390,7 +1418,10 @@ fn render_multiline_editor_pane(
         }
     }
 
-    if resp.clicked() || should_focus {
+    let is_pointer_clicked = ui.input(|i| i.pointer.primary_clicked() || i.pointer.primary_down());
+    let is_editor_hovered = resp.hovered();
+
+    if resp.clicked() || should_focus || (is_editor_hovered && is_pointer_clicked) {
         resp.request_focus();
     }
 }
@@ -1493,7 +1524,8 @@ fn handle_ghost_text(
     let prefix_str = prefix.to_string();
     let prefix_char_count = prefix_str.chars().count();
     let context_char_end = char_idx.saturating_sub(prefix_char_count);
-    let context_before = note.char_slice(0, context_char_end);
+    let context_char_start = context_char_end.saturating_sub(200);
+    let context_before = note.char_slice(context_char_start, context_char_end);
 
     let suggestion = suggestion_engine.suggest_with_context(&context_before, &prefix_str);
     *active_ghost_suffix = suggestion.clone();
@@ -1574,7 +1606,6 @@ enum BottomPanelAction {
 fn render_plugin_bottom_panel(
     panel_opt: &mut Option<crate::app::PluginPanelDisplayState>,
     ui: &mut Ui,
-    panel_width: f32,
     panel_height: f32,
     palette: &Palette,
 ) -> Option<BottomPanelAction> {
@@ -1601,7 +1632,7 @@ fn render_plugin_bottom_panel(
             .inner_margin(Margin::symmetric(10, 8));
 
         frame.show(ui, |ui| {
-            ui.set_width(panel_width);
+            ui.set_width(ui.available_width());
             ui.set_height(panel_height);
 
             // Panel Header Bar

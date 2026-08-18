@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod crash;
+pub mod diagnostics;
 pub mod font;
 
 pub use cli::CliArgs;

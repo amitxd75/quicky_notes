@@ -9,10 +9,23 @@ pub const MAX_HTTP_RESPONSE_BYTES: usize = 5_242_880;
 pub const HTTP_TIMEOUT_SECONDS: u64 = 3;
 
 /// Internal state for tracking HTTP request execution and results.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct HttpHandleInner {
     pub last_status_code: i64,
     pub last_error: String,
+    pub timeout_secs: u64,
+    pub max_response_bytes: usize,
+}
+
+impl Default for HttpHandleInner {
+    fn default() -> Self {
+        Self {
+            last_status_code: 0,
+            last_error: String::new(),
+            timeout_secs: HTTP_TIMEOUT_SECONDS,
+            max_response_bytes: MAX_HTTP_RESPONSE_BYTES,
+        }
+    }
 }
 
 /// HTTP client proxy object exposed to Rhai scripts as `http`.
@@ -22,9 +35,21 @@ pub struct HttpHandle {
 }
 
 impl HttpHandle {
-    /// Creates a new HTTP handle instance.
+    /// Creates a new HTTP handle instance with default limits.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a new HTTP handle with custom timeout and body limits.
+    pub fn with_config(timeout_secs: u64, max_response_bytes: usize) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HttpHandleInner {
+                last_status_code: 0,
+                last_error: String::new(),
+                timeout_secs: timeout_secs.clamp(1, 30),
+                max_response_bytes: max_response_bytes.clamp(100_000, 50_000_000),
+            })),
+        }
     }
 
     /// Returns the HTTP status code of the most recent request (or 0 if failed).
@@ -53,8 +78,14 @@ impl HttpHandle {
             return String::new();
         }
 
+        let (timeout, max_bytes) = self
+            .inner
+            .lock()
+            .map(|i| (i.timeout_secs, i.max_response_bytes))
+            .unwrap_or((HTTP_TIMEOUT_SECONDS, MAX_HTTP_RESPONSE_BYTES));
+
         let client = match reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(HTTP_TIMEOUT_SECONDS))
+            .timeout(Duration::from_secs(timeout))
             .build()
         {
             Ok(c) => c,
@@ -77,11 +108,7 @@ impl HttpHandle {
                 self.set_status(status);
                 use std::io::Read;
                 let mut b = Vec::new();
-                match response
-                    .by_ref()
-                    .take(MAX_HTTP_RESPONSE_BYTES as u64)
-                    .read_to_end(&mut b)
-                {
+                match response.by_ref().take(max_bytes as u64).read_to_end(&mut b) {
                     Ok(_) => String::from_utf8_lossy(&b).to_string(),
                     Err(e) => {
                         self.set_error(format!("Failed to read response body: {}", e));
@@ -109,8 +136,14 @@ impl HttpHandle {
             return String::new();
         }
 
+        let (timeout, max_bytes) = self
+            .inner
+            .lock()
+            .map(|i| (i.timeout_secs, i.max_response_bytes))
+            .unwrap_or((HTTP_TIMEOUT_SECONDS, MAX_HTTP_RESPONSE_BYTES));
+
         let client = match reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(HTTP_TIMEOUT_SECONDS))
+            .timeout(Duration::from_secs(timeout))
             .build()
         {
             Ok(c) => c,
@@ -142,11 +175,7 @@ impl HttpHandle {
                 self.set_status(status);
                 use std::io::Read;
                 let mut b = Vec::new();
-                match response
-                    .by_ref()
-                    .take(MAX_HTTP_RESPONSE_BYTES as u64)
-                    .read_to_end(&mut b)
-                {
+                match response.by_ref().take(max_bytes as u64).read_to_end(&mut b) {
                     Ok(_) => String::from_utf8_lossy(&b).to_string(),
                     Err(e) => {
                         self.set_error(format!("Failed to read response body: {}", e));

@@ -222,13 +222,13 @@ fn render_tabs_list(
                             )
                         } else {
                             format!(
-                                "📁 Linked File Path:\n{}\n\n• Click to switch\n• Right-click for options / copy path\n• Double-click to rename",
+                                "📁 Linked File Path:\n{}\n\n• Click to switch\n• Right-click to rename or view options",
                                 fp
                             )
                         }
                     } else {
                         format!(
-                            "📝 Note: {}\nQuicky Notes internal storage\n\n• Click to switch\n• Right-click for options\n• Double-click to rename",
+                            "📝 Note: {}\nQuicky Notes internal storage\n\n• Click to switch\n• Right-click to rename or view options",
                             base_title
                         )
                     };
@@ -287,10 +287,6 @@ fn render_tabs_list(
 
                     if tab_btn.clicked() {
                         tab_to_select = Some(note.id.clone());
-                    }
-
-                    if tab_btn.double_clicked() {
-                        app.editing_title = Some((note.id.clone(), note.title.clone()));
                     }
                 }
 

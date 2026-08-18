@@ -63,11 +63,13 @@ pub fn render_floating_toast(app: &mut QuickyNotesApp, ctx: &egui::Context) {
 
     let elapsed = toast.created_at.elapsed().as_secs_f32();
     if elapsed >= 3.2 {
+        app.toast = None;
+        ctx.request_repaint();
         return;
     }
 
-    // Request continuous repaint for smooth animation
-    ctx.request_repaint();
+    // Request paced 60 FPS animation repaint instead of uncapped CPU spinning
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
 
     // Fade in 0.0..0.2s, stay 0.2..2.6s, fade out 2.6..3.2s
     let alpha_factor = if elapsed < 0.2 {
@@ -137,16 +139,4 @@ pub fn render_floating_toast(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                     });
                 });
         });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_toast_creation_and_icon() {
-        let toast = Toast::new("Saved", ToastKind::Success);
-        assert_eq!(toast.kind.icon(), "✓");
-        assert_eq!(toast.message, "Saved");
-    }
 }

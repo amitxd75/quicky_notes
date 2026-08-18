@@ -47,13 +47,15 @@ struct TextureCache {
 }
 
 impl TextureCache {
-    fn insert(&mut self, key: String, handle: TextureHandle) {
-        if self.textures.len() >= MAX_TEXTURE_CACHE_ENTRIES
-            && !self.textures.contains_key(&key)
-            && let Some(oldest) = self.order.first().cloned()
-        {
-            self.order.remove(0);
-            self.textures.remove(&oldest);
+    fn insert(&mut self, key: String, handle: TextureHandle, capacity: usize) {
+        let max_cap = capacity.max(8);
+        while self.textures.len() >= max_cap && !self.textures.contains_key(&key) {
+            if let Some(oldest) = self.order.first().cloned() {
+                self.order.remove(0);
+                self.textures.remove(&oldest);
+            } else {
+                break;
+            }
         }
         self.order.retain(|k| k != &key);
         self.order.push(key.clone());
@@ -79,13 +81,30 @@ fn get_texture_cache() -> &'static Mutex<TextureCache> {
     })
 }
 
-/// Retrieves or decodes an image attachment into an `egui::TextureHandle`.
-///
-/// Images are cached in memory by composite key `"{note_id}:{attachment_id}"`.
+/// Retrieves or decodes an image attachment into an `egui::TextureHandle` with default limits.
 pub fn get_or_load_attachment_texture(
     ctx: &egui::Context,
     note_id: &str,
     att: &NoteAttachment,
+) -> Option<TextureHandle> {
+    get_or_load_attachment_texture_with_limits(
+        ctx,
+        note_id,
+        att,
+        MAX_IMAGE_DIMENSION,
+        MAX_IMAGE_PIXELS,
+        MAX_TEXTURE_CACHE_ENTRIES,
+    )
+}
+
+/// Retrieves or decodes an image attachment into an `egui::TextureHandle` with custom limits.
+pub fn get_or_load_attachment_texture_with_limits(
+    ctx: &egui::Context,
+    note_id: &str,
+    att: &NoteAttachment,
+    max_dim: u32,
+    max_pixels: u64,
+    cache_capacity: usize,
 ) -> Option<TextureHandle> {
     let key = format!("{}:{}", note_id, att.id);
     let mut cache = get_texture_cache().lock().unwrap();
@@ -95,10 +114,10 @@ pub fn get_or_load_attachment_texture(
         return Some(tex);
     }
 
-    match decode_color_image(&att.data) {
+    match decode_color_image_with_limits(&att.data, max_dim, max_pixels) {
         Ok(color_img) => {
             let tex = ctx.load_texture(&key, color_img, TextureOptions::LINEAR);
-            cache.insert(key, tex.clone());
+            cache.insert(key, tex.clone(), cache_capacity);
             Some(tex)
         }
         Err(err) => {
@@ -111,18 +130,25 @@ pub fn get_or_load_attachment_texture(
     }
 }
 
-/// Decodes raw image bytes (PNG, JPEG, WebP, GIF, BMP) into an `egui::ColorImage`.
+/// Decodes raw image bytes (PNG, JPEG, WebP, GIF, BMP) into an `egui::ColorImage` using default limits.
+#[allow(dead_code)]
 fn decode_color_image(bytes: &[u8]) -> Result<ColorImage, String> {
+    decode_color_image_with_limits(bytes, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS)
+}
+
+/// Decodes raw image bytes into an `egui::ColorImage` using configurable limits.
+pub fn decode_color_image_with_limits(
+    bytes: &[u8],
+    max_dim: u32,
+    max_pixels: u64,
+) -> Result<ColorImage, String> {
     if bytes.is_empty() {
         return Err("Empty image payload".to_string());
     }
     let dyn_img =
         image::load_from_memory(bytes).map_err(|e| format!("Image decode failed: {}", e))?;
     let (w, h) = (dyn_img.width(), dyn_img.height());
-    if w > MAX_IMAGE_DIMENSION
-        || h > MAX_IMAGE_DIMENSION
-        || (w as u64 * h as u64) > MAX_IMAGE_PIXELS
-    {
+    if w > max_dim || h > max_dim || (w as u64 * h as u64) > max_pixels {
         return Err(format!(
             "Image dimensions {}x{} exceed maximum supported limit",
             w, h

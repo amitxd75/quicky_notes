@@ -157,3 +157,46 @@ pub fn slider_row_u32(
     })
     .inner
 }
+
+/// Renders a labeled slider row for usize values.
+pub fn slider_row_usize(
+    ui: &mut Ui,
+    label: &str,
+    value_display: &str,
+    value: &mut usize,
+    range: std::ops::RangeInclusive<usize>,
+    accent: Color32,
+) -> egui::Response {
+    let mut u32_val = *value as u32;
+    let u32_range = (*range.start() as u32)..=(*range.end() as u32);
+    let resp = slider_row_u32(ui, label, value_display, &mut u32_val, u32_range, accent);
+    if resp.changed() {
+        *value = u32_val as usize;
+    }
+    resp
+}
+
+/// Renders a labeled slider row for u64 values.
+pub fn slider_row_u64(
+    ui: &mut Ui,
+    label: &str,
+    value_display: &str,
+    value: &mut u64,
+    range: std::ops::RangeInclusive<u64>,
+    accent: Color32,
+) -> egui::Response {
+    let mut float_val = *value as f32;
+    let float_range = (*range.start() as f32)..=(*range.end() as f32);
+    let resp = slider_row(
+        ui,
+        label,
+        value_display,
+        &mut float_val,
+        float_range,
+        accent,
+    );
+    if resp.changed() {
+        *value = float_val.round() as u64;
+    }
+    resp
+}

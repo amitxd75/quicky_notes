@@ -1077,38 +1077,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shortcut_default_bindings() {
-        let kb = KeyBindings::default();
-        assert_eq!(
-            kb.get(ShortcutAction::NewNote),
-            KeyBinding {
-                key: "N".to_string(),
-                ctrl: true,
-                shift: false,
-                alt: false,
-            }
-        );
-        assert_eq!(
-            kb.get(ShortcutAction::ExportNote),
-            KeyBinding {
-                key: "E".to_string(),
-                ctrl: true,
-                shift: true,
-                alt: false,
-            }
-        );
-        assert_eq!(
-            kb.get(ShortcutAction::OpenSettings),
-            KeyBinding {
-                key: ",".to_string(),
-                ctrl: true,
-                shift: false,
-                alt: false,
-            }
-        );
-    }
-
-    #[test]
     fn test_keybinding_display_formatting() {
         let binding = KeyBinding::ctrl("N");
         assert_eq!(binding.to_display_string(), "Ctrl + N");

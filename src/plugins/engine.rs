@@ -28,17 +28,34 @@ impl Default for PluginEngine {
 }
 
 impl PluginEngine {
-    /// Creates and configures a new sandboxed Rhai engine instance.
+    /// Creates and configures a new sandboxed Rhai engine instance with default resource limits.
     pub fn new() -> Self {
+        Self::with_limits(
+            MAX_SCRIPT_OPERATIONS,
+            MAX_SCRIPT_CALL_LEVELS,
+            MAX_SCRIPT_STRING_SIZE,
+            MAX_SCRIPT_ARRAY_SIZE,
+            MAX_SCRIPT_MAP_SIZE,
+        )
+    }
+
+    /// Creates and configures a new sandboxed Rhai engine instance with custom resource quotas.
+    pub fn with_limits(
+        max_operations: u64,
+        max_call_levels: usize,
+        max_string_size: usize,
+        max_array_size: usize,
+        max_map_size: usize,
+    ) -> Self {
         let mut engine = Engine::new();
 
         // Enforce strict security and resource limits
-        engine.set_max_operations(MAX_SCRIPT_OPERATIONS);
-        engine.set_max_call_levels(MAX_SCRIPT_CALL_LEVELS);
+        engine.set_max_operations(max_operations);
+        engine.set_max_call_levels(max_call_levels);
         engine.set_max_expr_depths(64, 64);
-        engine.set_max_string_size(MAX_SCRIPT_STRING_SIZE);
-        engine.set_max_array_size(MAX_SCRIPT_ARRAY_SIZE);
-        engine.set_max_map_size(MAX_SCRIPT_MAP_SIZE);
+        engine.set_max_string_size(max_string_size);
+        engine.set_max_array_size(max_array_size);
+        engine.set_max_map_size(max_map_size);
 
         // Register Quicky Notes APIs
         api::register_apis(&mut engine);
