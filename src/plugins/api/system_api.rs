@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 /// Maximum allowed output capture in bytes (1 MB) to prevent memory exhaustion.
 pub const MAX_EXEC_OUTPUT_BYTES: usize = 1_048_576;
@@ -76,34 +77,89 @@ impl SystemHandle {
             .is_ok()
     }
 
-    /// Executes a command synchronously, capturing stdout up to 1MB (enforces timeout and byte cap).
+    /// Executes a command synchronously, capturing stdout up to 1MB (enforces 2s timeout and child kill).
     pub fn exec_sync(&mut self, command: String, args: rhai::Array) -> String {
         let cmd = command.trim();
         if cmd.is_empty() {
             return String::new();
         }
 
-        let mut child = Command::new(cmd);
+        let mut cmd_builder = Command::new(cmd);
         for arg in args {
             if let Ok(s) = arg.into_string() {
-                child.arg(s);
+                cmd_builder.arg(s);
             }
         }
 
-        child
+        cmd_builder
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::null());
 
-        match child.output() {
-            Ok(output) => {
-                let mut bytes = output.stdout;
-                if bytes.len() > MAX_EXEC_OUTPUT_BYTES {
-                    bytes.truncate(MAX_EXEC_OUTPUT_BYTES);
-                }
-                String::from_utf8_lossy(&bytes).to_string()
+        let child = match cmd_builder.spawn() {
+            Ok(c) => c,
+            Err(_) => return String::new(),
+        };
+
+        let child_arc = Arc::new(Mutex::new(Some(child)));
+        let child_clone = Arc::clone(&child_arc);
+
+        let timeout_duration = std::time::Duration::from_millis(2000);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+        // Supervisor thread to kill child on timeout
+        std::thread::spawn(move || {
+            if done_rx.recv_timeout(timeout_duration).is_err()
+                && let Ok(mut guard) = child_clone.lock()
+                && let Some(mut c) = guard.take()
+            {
+                let _ = c.kill();
+                let _ = c.wait();
             }
-            Err(_) => String::new(),
+        });
+
+        // Worker thread to read bounded stdout
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let child_worker = Arc::clone(&child_arc);
+
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let mut stdout_opt = None;
+            if let Ok(mut guard) = child_worker.lock()
+                && let Some(ref mut c) = *guard
+            {
+                stdout_opt = c.stdout.take();
+            }
+
+            if let Some(mut stream) = stdout_opt {
+                use std::io::Read;
+                let _ = stream
+                    .by_ref()
+                    .take(MAX_EXEC_OUTPUT_BYTES as u64)
+                    .read_to_end(&mut buf);
+            }
+
+            if let Ok(mut guard) = child_worker.lock()
+                && let Some(mut c) = guard.take()
+            {
+                let _ = c.wait();
+            }
+
+            let _ = done_tx.send(());
+            let _ = result_tx.send(buf);
+        });
+
+        match result_rx.recv_timeout(timeout_duration + std::time::Duration::from_millis(300)) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).trim().to_string(),
+            Err(_) => {
+                if let Ok(mut guard) = child_arc.lock()
+                    && let Some(mut c) = guard.take()
+                {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                String::new()
+            }
         }
     }
 

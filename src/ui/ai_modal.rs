@@ -92,6 +92,7 @@ impl AiModalState {
             provider: ai_settings.provider,
             model: ai_settings.model.clone(),
             api_key: ai_settings.api_key.clone(),
+            temperature: Some(ai_settings.temperature),
             system_prompt: ai_settings.system_prompt.clone(),
         };
 

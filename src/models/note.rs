@@ -2,6 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NOTE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Generates a globally unique note ID combining nanosecond timestamps with a monotonic atomic counter.
+pub fn generate_unique_note_id() -> String {
+    let count = NOTE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = chrono::Local::now().timestamp_nanos_opt().unwrap_or(0);
+    format!("note-{}-{}", nanos, count)
+}
 
 /// Maximum title length to prevent UI overflow or excessive allocation.
 pub const MAX_NOTE_TITLE_LEN: usize = 128;
@@ -17,6 +27,18 @@ pub const QN_MAGIC: &[u8; 6] = b"QNOTE\x01";
 
 /// Header overhead size for .qn binary containers (6 bytes magic + 4 bytes metadata length).
 pub const QN_HEADER_OVERHEAD: usize = 10;
+
+/// Maximum allowable .qn binary file size (25 MB) to prevent memory exhaustion.
+pub const MAX_QN_FILE_SIZE: usize = 25 * 1024 * 1024;
+
+/// Maximum allowable size for a single attachment (10 MB).
+pub const MAX_ATTACHMENT_SIZE: usize = 10 * 1024 * 1024;
+
+/// Maximum cumulative size for all attachments in a single note (50 MB).
+pub const MAX_TOTAL_ATTACHMENTS_SIZE: usize = 50 * 1024 * 1024;
+
+/// Maximum number of attachments permitted per note.
+pub const MAX_ATTACHMENTS_PER_NOTE: usize = 50;
 
 /// Embedded raw image attachment inside a note.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +121,7 @@ pub enum QnDecodeError {
     InvalidMagic,
     CorruptMetadata(String),
     TruncatedPayload,
+    ExceedsLimit(String),
 }
 
 impl fmt::Display for QnDecodeError {
@@ -108,6 +131,7 @@ impl fmt::Display for QnDecodeError {
             Self::InvalidMagic => write!(f, "Invalid magic signature in .qn header"),
             Self::CorruptMetadata(msg) => write!(f, "Corrupt .qn metadata: {}", msg),
             Self::TruncatedPayload => write!(f, "Truncated image payload in .qn file"),
+            Self::ExceedsLimit(msg) => write!(f, "Payload exceeds size limit: {}", msg),
         }
     }
 }
@@ -142,9 +166,17 @@ pub struct Note {
     #[serde(default)]
     pub file_path: Option<String>,
 
-    /// Timestamp of the linked disk file when last read or written (to detect external changes without clobbering typing).
+    /// Timestamp of the linked disk file when last read or written.
     #[serde(skip)]
     pub last_disk_mtime: Option<std::time::SystemTime>,
+
+    /// Unsaved modifications in the local editor buffer.
+    #[serde(skip)]
+    pub is_dirty: bool,
+
+    /// Flag indicating external disk changes occurred while in-memory edits were unsaved.
+    #[serde(skip)]
+    pub has_disk_conflict: bool,
 
     /// Embedded image attachments bundled inside this note.
     #[serde(default)]
@@ -155,7 +187,7 @@ impl Note {
     /// Creates a new note with a validated ID and title.
     ///
     /// # Invariants
-    /// - `id` is verified non-empty (empty IDs are replaced with timestamp-based fallbacks instead of panicking).
+    /// - `id` is verified non-empty (empty IDs are replaced with timestamp-based fallbacks).
     /// - `title` is sanitized (trimmed, clamped in length, falling back to `DEFAULT_NOTE_TITLE` if blank).
     pub fn new(id: String, title: String) -> Self {
         let id = if id.trim().is_empty() {
@@ -177,6 +209,8 @@ impl Note {
             color_tag: None,
             file_path: None,
             last_disk_mtime: None,
+            is_dirty: false,
+            has_disk_conflict: false,
             attachments: Vec::new(),
         }
     }
@@ -444,6 +478,14 @@ impl Note {
 
     /// Decodes a `.qn` binary payload into a `Note`.
     pub fn decode_qn_binary(bytes: &[u8]) -> Result<Self, QnDecodeError> {
+        if bytes.len() > MAX_QN_FILE_SIZE {
+            return Err(QnDecodeError::ExceedsLimit(format!(
+                "Payload size {} exceeds maximum allowable .qn size {}",
+                bytes.len(),
+                MAX_QN_FILE_SIZE
+            )));
+        }
+
         if bytes.len() < QN_HEADER_OVERHEAD {
             return Err(QnDecodeError::TooShort);
         }
@@ -457,7 +499,7 @@ impl Note {
             .map_err(|_| QnDecodeError::TooShort)?;
         let meta_len = u32::from_le_bytes(meta_len_bytes) as usize;
 
-        if bytes.len() < QN_HEADER_OVERHEAD + meta_len {
+        if meta_len > MAX_QN_FILE_SIZE || bytes.len() < QN_HEADER_OVERHEAD + meta_len {
             return Err(QnDecodeError::TooShort);
         }
 
@@ -465,13 +507,38 @@ impl Note {
         let meta: QnMetaHeader = serde_json::from_slice(meta_slice)
             .map_err(|e| QnDecodeError::CorruptMetadata(e.to_string()))?;
 
+        if meta.images.len() > MAX_ATTACHMENTS_PER_NOTE {
+            return Err(QnDecodeError::ExceedsLimit(format!(
+                "Attachment count {} exceeds maximum allowable count {}",
+                meta.images.len(),
+                MAX_ATTACHMENTS_PER_NOTE
+            )));
+        }
+
         let payload_start = QN_HEADER_OVERHEAD + meta_len;
         let payload_slice = &bytes[payload_start..];
 
+        let mut total_att_bytes: usize = 0;
         let mut attachments = Vec::with_capacity(meta.images.len());
         for img_desc in meta.images {
+            let length = img_desc.length as usize;
+            if length > MAX_ATTACHMENT_SIZE {
+                return Err(QnDecodeError::ExceedsLimit(format!(
+                    "Attachment '{}' size {} exceeds max single attachment size {}",
+                    img_desc.name, length, MAX_ATTACHMENT_SIZE
+                )));
+            }
+
+            total_att_bytes = total_att_bytes.saturating_add(length);
+            if total_att_bytes > MAX_TOTAL_ATTACHMENTS_SIZE {
+                return Err(QnDecodeError::ExceedsLimit(format!(
+                    "Cumulative attachments size exceeds maximum allowable limit {}",
+                    MAX_TOTAL_ATTACHMENTS_SIZE
+                )));
+            }
+
             let start = img_desc.offset as usize;
-            let end = start + img_desc.length as usize;
+            let end = start + length;
 
             if end > payload_slice.len() {
                 return Err(QnDecodeError::TruncatedPayload);
@@ -495,6 +562,8 @@ impl Note {
             color_tag: meta.color_tag,
             file_path: None,
             last_disk_mtime: None,
+            is_dirty: false,
+            has_disk_conflict: false,
             attachments,
         };
 
@@ -585,5 +654,18 @@ mod tests {
         assert!(removed);
         assert_eq!(note.attachments.len(), 0);
         assert!(note.get_attachment(&id).is_none());
+    }
+
+    #[test]
+    fn test_qn_decode_resource_limits() {
+        // Test oversized payload rejection
+        let oversized = vec![0u8; MAX_QN_FILE_SIZE + 100];
+        let res = Note::decode_qn_binary(&oversized);
+        assert!(matches!(res, Err(QnDecodeError::ExceedsLimit(_))));
+
+        // Test invalid magic signature
+        let corrupt = b"CORRUPT_BYTES";
+        let res2 = Note::decode_qn_binary(corrupt);
+        assert_eq!(res2, Err(QnDecodeError::InvalidMagic));
     }
 }

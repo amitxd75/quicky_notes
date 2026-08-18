@@ -177,11 +177,23 @@ def main():
 
         # Extract images if requested
         if args.extract_images:
-            extract_dir = Path(args.extract_images)
+            extract_dir = Path(args.extract_images).resolve()
             extract_dir.mkdir(parents=True, exist_ok=True)
             for img in images:
-                safe_name = f"{img['id']}_{img['name']}"
-                dest = extract_dir / safe_name
+                safe_id = "".join(c for c in os.path.basename(str(img.get("id", "img"))) if c.isalnum() or c in "_-")
+                safe_name = "".join(c for c in os.path.basename(str(img.get("name", "image.png"))) if c.isalnum() or c in "._-")
+                if not safe_name:
+                    safe_name = "image.png"
+                target_filename = f"{safe_id}_{safe_name}" if safe_id else safe_name
+                dest = (extract_dir / target_filename).resolve()
+                try:
+                    if not dest.is_relative_to(extract_dir):
+                        print(f"Warning: Skipping attachment with unsafe traversal path: {target_filename}", file=sys.stderr)
+                        continue
+                except AttributeError:
+                    if not str(dest).startswith(str(extract_dir)):
+                        print(f"Warning: Skipping attachment with unsafe traversal path: {target_filename}", file=sys.stderr)
+                        continue
                 with open(dest, "wb") as f:
                     f.write(img["data"])
                 print(f"  Extracted: {dest} ({img['size_bytes']} bytes)")

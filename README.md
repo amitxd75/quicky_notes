@@ -10,7 +10,7 @@ Lightweight floating glassmorphism note widget and fast code scratchpad for Hypr
 - **Multi-Provider AI Copilot**: Native support for Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for refactoring and summaries.
 - **Portable `.qn` Containers & Direct Disk Linking**: Binary note format with image embedding, plus live filesystem editing with automatic mtime detection.
 - **Syntax Highlighting & Soft-Wrap Aware Gutter**: Highlighting for 15+ languages with stable, pixel-locked line numbering.
-- **Embedded Rhai Scripting**: A sandboxed Rust engine for custom buttons, hotkeys, and hot-reloadable community plugins.
+- **Embedded Rhai Scripting**: A lightweight Rust scripting engine for custom buttons, hotkeys, and hot-reloadable community plugins.
 
 ![Settings](./assets/screenshot-settings.png)
 ![Plugin Manager](./assets/screenshot-plugin.png)

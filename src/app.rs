@@ -65,6 +65,9 @@ pub struct QuickyNotesApp {
     /// Whether unsaved modifications exist.
     pub is_dirty: bool,
 
+    /// Last recorded window focus state to detect focus transitions.
+    pub last_window_focused: bool,
+
     /// Receiver for async file dialog results.
     pub file_dialog_rx: Option<mpsc::Receiver<Option<String>>>,
 
@@ -210,6 +213,7 @@ impl QuickyNotesApp {
             confirm_close_id: None,
             is_closing: false,
             is_dirty: false,
+            last_window_focused: false,
             file_dialog_rx: None,
             export_dialog_rx: None,
             export_settings_rx: None,
@@ -537,7 +541,7 @@ impl QuickyNotesApp {
     /// Creates a new note tab and selects it.
     pub fn create_new_note(&mut self) {
         let count = self.data.notes.len() + 1;
-        let id = format!("note-{}", chrono::Local::now().timestamp_millis());
+        let id = crate::models::note::generate_unique_note_id();
         let ext = if self.data.settings.editor.default_extension.starts_with('.') {
             &self.data.settings.editor.default_extension
         } else {
@@ -554,14 +558,12 @@ impl QuickyNotesApp {
         self.set_status("New tab created");
     }
 
-    /// Prompts close confirmation modal if note has unsaved changes, or closes immediately for linked files / empty notes.
+    /// Prompts close confirmation modal if note has unsaved changes.
     pub fn prompt_close_note(&mut self, id: &str) {
         if let Some(note) = self.data.notes.iter().find(|n| n.id == id) {
-            // Linked disk files or notes without unsaved custom content close immediately without modal darkening
-            if note.file_path.is_some()
-                || !self.data.settings.editor.confirm_close_tab
-                || note.content.trim().is_empty()
-            {
+            let has_unsaved_changes =
+                note.is_dirty || (note.file_path.is_none() && !note.content.trim().is_empty());
+            if !self.data.settings.editor.confirm_close_tab || !has_unsaved_changes {
                 self.close_note(id);
             } else {
                 self.confirm_close_id = Some(id.to_string());
@@ -797,8 +799,9 @@ impl QuickyNotesApp {
             self.last_auto_save = Instant::now();
         }
 
-        // Real-time wallpaper theme sync (polls Caelestia/Pywal every 1s with mtime caching)
-        if self.data.settings.appearance.theme_mode == theme::ThemeMode::WallpaperSync
+        // Real-time wallpaper theme sync (polls Caelestia/Pywal every 1s if auto_sync_wallpaper is enabled)
+        if self.data.settings.general.auto_sync_wallpaper
+            && self.data.settings.appearance.theme_mode == theme::ThemeMode::WallpaperSync
             && self.last_wallpaper_check.elapsed() > Duration::from_secs(1)
         {
             self.last_wallpaper_check = Instant::now();
@@ -824,9 +827,14 @@ impl QuickyNotesApp {
             }
         }
 
-        // Real-time live disk sync for externally modified files (every 500ms or on window focus)
+        // Real-time live disk sync for externally modified files
         let is_window_focused = ctx.input(|i| i.raw.focused);
-        if self.last_disk_sync.elapsed() > Duration::from_millis(500) || is_window_focused {
+        let focus_gained = is_window_focused && !self.last_window_focused;
+        self.last_window_focused = is_window_focused;
+
+        if self.data.settings.general.live_disk_sync
+            && (self.last_disk_sync.elapsed() > Duration::from_millis(500) || focus_gained)
+        {
             self.last_disk_sync = Instant::now();
             if self.reconcile_linked_notes_from_disk() {
                 self.set_status("Live reloaded from disk");
@@ -881,6 +889,7 @@ mod tests {
             confirm_close_id: None,
             is_closing: false,
             is_dirty: false,
+            last_window_focused: false,
             file_dialog_rx: None,
             export_dialog_rx: None,
             export_settings_rx: None,

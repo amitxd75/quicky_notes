@@ -239,6 +239,7 @@ pub struct AiRequest {
     pub provider: AiProvider,
     pub model: String,
     pub api_key: String,
+    pub temperature: Option<f32>,
     pub system_prompt: String,
 }
 
@@ -325,8 +326,9 @@ async fn execute_ai_chat(req: AiRequest) -> Result<String, String> {
         req.model.trim()
     };
 
+    let temp = req.temperature.unwrap_or(0.7).clamp(0.0, 2.0) as f64;
     let chat_options = genai::chat::ChatOptions::default()
-        .with_temperature(0.2)
+        .with_temperature(temp)
         .with_max_tokens(2048);
 
     let chat_future = client.exec_chat(model_name, chat_req, Some(&chat_options));
@@ -409,12 +411,13 @@ pub fn spawn_generate_theme_request(
     provider: AiProvider,
     model: String,
     api_key: String,
+    temperature: Option<f32>,
 ) -> mpsc::Receiver<Result<GeneratedTheme, String>> {
     let (tx, rx) = mpsc::channel();
     let rt = get_or_init_runtime();
 
     rt.spawn(async move {
-        let result = execute_theme_generation(prompt, provider, model, api_key).await;
+        let result = execute_theme_generation(prompt, provider, model, api_key, temperature).await;
         let _ = tx.send(result);
     });
 
@@ -426,6 +429,7 @@ async fn execute_theme_generation(
     provider: AiProvider,
     model: String,
     api_key: String,
+    temperature: Option<f32>,
 ) -> Result<GeneratedTheme, String> {
     let mut client_builder = genai::Client::builder();
 
@@ -459,8 +463,9 @@ async fn execute_theme_generation(
         model.trim()
     };
 
+    let temp = temperature.unwrap_or(0.4).clamp(0.0, 2.0) as f64;
     let chat_options = genai::chat::ChatOptions::default()
-        .with_temperature(0.4)
+        .with_temperature(temp)
         .with_max_tokens(1024);
 
     let chat_future = client.exec_chat(model_name, chat_req, Some(&chat_options));
@@ -571,5 +576,20 @@ mod tests {
         assert_eq!(t.name, "Cyberpunk Neon");
         assert_eq!(parse_hex_color(&t.accent), Some([0, 240, 255]));
         assert_eq!(t.opacity, Some(0.90));
+    }
+
+    #[test]
+    fn test_ai_request_temperature_field() {
+        let req = AiRequest {
+            target_text: "test".to_string(),
+            context_before: "".to_string(),
+            action: AiAction::FixAndPolish,
+            provider: AiProvider::Gemini,
+            model: "gemini-2.5-flash".to_string(),
+            api_key: "".to_string(),
+            temperature: Some(0.85),
+            system_prompt: "test prompt".to_string(),
+        };
+        assert_eq!(req.temperature, Some(0.85));
     }
 }

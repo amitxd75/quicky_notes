@@ -567,6 +567,7 @@ fn render_ai_theme_generator_card(
                     app.data.settings.ai.provider,
                     app.data.settings.ai.model.clone(),
                     app.data.settings.ai.api_key.clone(),
+                    Some(app.data.settings.ai.temperature),
                 );
                 app.ai_theme_rx = Some(rx);
                 app.show_toast(
@@ -1355,6 +1356,7 @@ fn render_ai_settings_card(
                 provider: app.data.settings.ai.provider,
                 model: app.data.settings.ai.model.clone(),
                 api_key: app.data.settings.ai.api_key.clone(),
+                temperature: Some(app.data.settings.ai.temperature),
                 system_prompt: app.data.settings.ai.system_prompt.clone(),
             };
             let rx = crate::ai::spawn_ai_request(req);

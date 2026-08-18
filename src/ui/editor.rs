@@ -445,7 +445,32 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
 
                     if content_changed {
                         note.update_timestamp();
+                        note.is_dirty = true;
+                        note.has_disk_conflict = false;
                         app.is_dirty = true;
+
+                        if app.data.settings.general.auto_title_from_first_line && note.file_path.is_none() {
+                            let prefix = app.data.settings.general.default_title_prefix.to_lowercase();
+                            let is_default_title = note.title.to_lowercase().starts_with(&prefix)
+                                || note.title.starts_with("untitled");
+                            if is_default_title
+                                && let Some(first_line) = note.content.lines().find(|l| !l.trim().is_empty())
+                            {
+                                let clean_line = first_line.trim().trim_start_matches('#').trim();
+                                if !clean_line.is_empty() {
+                                    let ext = if note.is_markdown() {
+                                        ".md"
+                                    } else {
+                                        &app.data.settings.editor.default_extension
+                                    };
+                                    let mut truncated: String = clean_line.chars().take(24).collect();
+                                    if !truncated.ends_with(ext) {
+                                        truncated.push_str(ext);
+                                    }
+                                    note.title = crate::models::Note::sanitize_title(&truncated);
+                                }
+                            }
+                        }
                     }
 
                     // Render bottom plugin output console panel if active
@@ -490,6 +515,19 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             },
         );
     });
+
+    if content_changed {
+        app.is_dirty = true;
+        if app.data.settings.plugins.enabled {
+            let note = app.active_note();
+            let cursor = app.last_cursor_range;
+            let palette = app.active_palette();
+            let outcome = app
+                .plugin_manager
+                .dispatch_on_note_change(note, cursor, &palette);
+            app.apply_plugin_outcome(outcome);
+        }
+    }
 
     if let Some(action) = bottom_panel_action {
         match action {
@@ -1064,34 +1102,56 @@ pub fn render_close_confirmation_modal(app: &mut QuickyNotesApp, ctx: &egui::Con
                 // Action buttons
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
-
-                        let confirm_btn = crate::components::button::animated_danger_button(
-                            ui,
-                            "Close Note",
-                            egui::vec2(100.0, 30.0),
-                        );
-
-                        if confirm_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            ctx.input_mut(|i| {
-                                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                            });
-                            app.close_note(&close_id);
-                            app.confirm_close_id = None;
-                            ctx.request_repaint();
-                        }
+                        ui.spacing_mut().item_spacing.x = 8.0;
 
                         let cancel_btn = crate::components::button::animated_action_button(
                             ui,
                             "Cancel",
                             &palette,
-                            egui::vec2(80.0, 30.0),
+                            egui::vec2(70.0, 28.0),
                         );
 
                         if cancel_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                             ctx.input_mut(|i| {
                                 i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                             });
+                            app.confirm_close_id = None;
+                            ctx.request_repaint();
+                        }
+
+                        let discard_btn = crate::components::button::animated_danger_button(
+                            ui,
+                            "Discard",
+                            egui::vec2(80.0, 28.0),
+                        );
+
+                        if discard_btn.clicked() {
+                            app.close_note(&close_id);
+                            app.confirm_close_id = None;
+                            ctx.request_repaint();
+                        }
+
+                        let save_btn = crate::components::button::animated_primary_button(
+                            ui,
+                            "Save & Close",
+                            &palette,
+                            egui::vec2(105.0, 28.0),
+                        );
+
+                        if save_btn.clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            ctx.input_mut(|i| {
+                                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            });
+                            if let Some(note) = app.data.notes.iter_mut().find(|n| n.id == close_id)
+                                && note.file_path.is_some()
+                            {
+                                let _ =
+                                    crate::storage::linked_files::sync_single_linked_note_to_disk(
+                                        note,
+                                    );
+                            }
+                            app.save_if_dirty();
+                            app.close_note(&close_id);
                             app.confirm_close_id = None;
                             ctx.request_repaint();
                         }

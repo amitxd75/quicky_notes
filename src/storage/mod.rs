@@ -90,10 +90,20 @@ impl AppData {
     pub fn config_path() -> PathBuf {
         if let Some(proj_dirs) = ProjectDirs::from("com", "quicky", "quicky_notes") {
             let dir = proj_dirs.config_dir();
-            let _ = fs::create_dir_all(dir);
+            Self::ensure_private_dir(dir);
             dir.join("config.json")
         } else {
             PathBuf::from("config.json")
+        }
+    }
+
+    /// Helper to create and set 0700 permissions on private directories on Unix.
+    pub fn ensure_private_dir(dir: &Path) {
+        let _ = fs::create_dir_all(dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
         }
     }
 
@@ -106,11 +116,11 @@ impl AppData {
     pub fn logs_dir() -> PathBuf {
         if let Some(proj_dirs) = ProjectDirs::from("com", "quicky", "quicky_notes") {
             let dir = proj_dirs.config_dir().join("logs");
-            let _ = fs::create_dir_all(&dir);
+            Self::ensure_private_dir(&dir);
             dir
         } else {
             let dir = PathBuf::from("logs");
-            let _ = fs::create_dir_all(&dir);
+            Self::ensure_private_dir(&dir);
             dir
         }
     }
@@ -129,29 +139,34 @@ impl AppData {
         let settings = Self::load_settings_from_path(config_path);
 
         // 2. Load notes from SQLite notes.db
-        let (mut notes, active_note_id) = match Database::open(db_path) {
-            Ok(db) => match db.load_all_notes() {
-                Ok((loaded_notes, active_id)) => {
-                    if loaded_notes.is_empty() {
+        let (mut notes, active_note_id) = if !settings.general.restore_session {
+            let def = Self::default_initial();
+            (def.notes, def.active_note_id)
+        } else {
+            match Database::open(db_path) {
+                Ok(db) => match db.load_all_notes() {
+                    Ok((loaded_notes, active_id)) => {
+                        if loaded_notes.is_empty() {
+                            let def = Self::default_initial();
+                            (def.notes, def.active_note_id)
+                        } else {
+                            (loaded_notes, active_id)
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to load notes from SQLite: {}", e);
                         let def = Self::default_initial();
                         (def.notes, def.active_note_id)
-                    } else {
-                        (loaded_notes, active_id)
                     }
-                }
+                },
                 Err(e) => {
-                    eprintln!("Warning: Failed to load notes from SQLite: {}", e);
+                    eprintln!(
+                        "Warning: Failed to open SQLite database at {:?}: {}",
+                        db_path, e
+                    );
                     let def = Self::default_initial();
                     (def.notes, def.active_note_id)
                 }
-            },
-            Err(e) => {
-                eprintln!(
-                    "Warning: Failed to open SQLite database at {:?}: {}",
-                    db_path, e
-                );
-                let def = Self::default_initial();
-                (def.notes, def.active_note_id)
             }
         };
 
@@ -160,17 +175,43 @@ impl AppData {
             if let Some(ref path_str) = note.file_path {
                 let path = Path::new(path_str);
                 if path.exists() && path.is_file() {
+                    let mtime = fs::metadata(path).ok().and_then(|m| m.modified().ok());
+                    let had_unsaved_state = note.is_dirty || note.has_disk_conflict;
+
                     if note.is_qn() {
                         if let Ok(bytes) = fs::read(path)
                             && bytes.starts_with(crate::models::QN_MAGIC)
                             && let Ok(decoded) = Note::decode_qn_binary(&bytes)
                         {
-                            note.content = decoded.content;
-                            note.attachments = decoded.attachments;
-                            note.updated_at = decoded.updated_at;
+                            let differs = note.content != decoded.content
+                                || note.attachments != decoded.attachments;
+                            if had_unsaved_state && differs {
+                                // Genuine unsaved local edits exist: preserve in-memory/SQLite buffer and flag conflict
+                                note.has_disk_conflict = true;
+                                note.is_dirty = true;
+                            } else {
+                                // Clean note or matching content: reload from disk
+                                note.content = decoded.content;
+                                note.attachments = decoded.attachments;
+                                note.updated_at = decoded.updated_at;
+                                note.has_disk_conflict = false;
+                                note.is_dirty = false;
+                                note.last_disk_mtime = mtime;
+                            }
                         }
                     } else if let Ok(disk_content) = fs::read_to_string(path) {
-                        note.content = disk_content;
+                        let differs = note.content != disk_content;
+                        if had_unsaved_state && differs {
+                            // Genuine unsaved local edits exist: preserve in-memory/SQLite buffer and flag conflict
+                            note.has_disk_conflict = true;
+                            note.is_dirty = true;
+                        } else {
+                            // Clean note or matching content: reload from disk
+                            note.content = disk_content;
+                            note.has_disk_conflict = false;
+                            note.is_dirty = false;
+                            note.last_disk_mtime = mtime;
+                        }
                     }
                 }
             }
@@ -223,7 +264,7 @@ impl AppData {
         let _ = fs::rename(path, backup_path);
     }
 
-    /// Saves notes to SQLite (`notes.db`) and settings to JSON (`config.json`) atomically.
+    /// Saves notes to SQLite (`notes.db`) and settings to JSON (`config.json`).
     pub fn save(&self) -> Result<(), StorageError> {
         let config_path = Self::config_path();
         let db_path = Self::db_path();
@@ -232,9 +273,26 @@ impl AppData {
 
     /// Saves application data to specific configuration and database paths.
     pub fn save_to_paths(&self, config_path: &Path, db_path: &Path) -> Result<(), StorageError> {
+        // Defensive check: ensure all note IDs are strictly unique before writing, keeping active_id aligned
+        let mut sanitized_notes = self.notes.clone();
+        let mut seen_ids = HashSet::new();
+        let mut active_id = self.active_note_id.clone();
+
+        for note in &mut sanitized_notes {
+            if note.id.trim().is_empty() || !seen_ids.insert(note.id.clone()) {
+                let old_id = note.id.clone();
+                let new_id = crate::models::note::generate_unique_note_id();
+                note.id = new_id.clone();
+                seen_ids.insert(new_id.clone());
+                if active_id.as_deref() == Some(&old_id) {
+                    active_id = Some(new_id);
+                }
+            }
+        }
+
         // 1. Save notes to SQLite in an ACID transaction
         let mut db = Database::open(db_path)?;
-        db.save_all_notes(&self.notes, self.active_note_id.as_deref())?;
+        db.save_all_notes(&sanitized_notes, active_id.as_deref())?;
 
         // 2. Save settings to config.json with atomic write
         Self::save_settings_to_path(&self.settings, config_path)?;
@@ -242,10 +300,10 @@ impl AppData {
         Ok(())
     }
 
-    /// Atomically writes AppSettings to a JSON file.
+    /// Atomically writes AppSettings to a JSON file with restricted file permissions.
     pub fn save_settings_to_path(settings: &AppSettings, path: &Path) -> Result<(), StorageError> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            Self::ensure_private_dir(parent);
         }
 
         let temp_filename = format!(
@@ -262,14 +320,35 @@ impl AppData {
 
         let json_bytes = serde_json::to_vec_pretty(settings)?;
 
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true).mode(0o600);
+            options.open(&temp_path)?
+        };
+        #[cfg(not(unix))]
         let mut file = File::create(&temp_path)?;
+
         file.write_all(&json_bytes)?;
         file.sync_all()?;
         drop(file);
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600));
+        }
+
         if let Err(err) = fs::rename(&temp_path, path) {
             let _ = fs::remove_file(&temp_path);
             return Err(StorageError::Io(err));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
         }
 
         Ok(())
@@ -279,7 +358,7 @@ impl AppData {
     pub fn sanitize_and_validate(&mut self) {
         if self.notes.is_empty() {
             self.notes.push(Note::new(
-                "note-1".to_string(),
+                crate::models::note::generate_unique_note_id(),
                 crate::models::DEFAULT_NOTE_TITLE.to_string(),
             ));
         }
@@ -290,8 +369,13 @@ impl AppData {
             note.validate_and_repair(&fallback_id);
 
             if !seen_ids.insert(note.id.clone()) {
-                note.id = format!("{}-{}", note.id, i + 1);
-                seen_ids.insert(note.id.clone());
+                let old_id = note.id.clone();
+                let new_id = crate::models::note::generate_unique_note_id();
+                note.id = new_id.clone();
+                seen_ids.insert(new_id.clone());
+                if self.active_note_id.as_deref() == Some(&old_id) {
+                    self.active_note_id = Some(new_id);
+                }
             }
         }
 

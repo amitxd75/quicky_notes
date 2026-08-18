@@ -251,10 +251,28 @@ pub fn open_path_into_app(app: &mut QuickyNotesApp, path: &Path) {
 
     // 2. Image attachment
     if is_image_path(&canonical) {
+        if let Ok(meta) = std::fs::metadata(&canonical)
+            && meta.len() > crate::models::note::MAX_ATTACHMENT_SIZE as u64
+        {
+            app.show_toast(
+                "Image exceeds maximum 10 MB attachment limit",
+                ToastKind::Error,
+            );
+            return;
+        }
+
         if let Ok(bytes) = std::fs::read(&canonical) {
             let mime = NoteAttachment::detect_mime(&name);
             attach_image_to_active_note(app, &name, mime, bytes);
         }
+        return;
+    }
+
+    // Check overall file size limit before reading
+    if let Ok(meta) = std::fs::metadata(&canonical)
+        && meta.len() > crate::models::note::MAX_QN_FILE_SIZE as u64
+    {
+        app.show_toast("File exceeds maximum 25 MB size limit", ToastKind::Error);
         return;
     }
 
@@ -281,6 +299,12 @@ pub fn open_path_into_app(app: &mut QuickyNotesApp, path: &Path) {
         note.last_disk_mtime = std::fs::metadata(&canonical)
             .ok()
             .and_then(|m| m.modified().ok());
+
+        // Deduplicate note ID if it matches an already open tab
+        if app.data.notes.iter().any(|n| n.id == note.id) {
+            note.id = crate::models::note::generate_unique_note_id();
+        }
+
         let id = note.id.clone();
         app.data.notes.push(note);
         app.data.active_note_id = Some(id);
@@ -292,7 +316,7 @@ pub fn open_path_into_app(app: &mut QuickyNotesApp, path: &Path) {
 
     // 5. Standard text / Markdown / code file
     if let Ok(content) = std::fs::read_to_string(&canonical) {
-        let id = format!("note-{}", chrono::Local::now().timestamp_millis());
+        let id = crate::models::note::generate_unique_note_id();
         let mut note = Note::new(id.clone(), name.clone());
         note.content = content;
         note.file_path = Some(path_str);
@@ -392,8 +416,28 @@ pub fn attach_image_to_active_note_at_cursor(
     bytes: Vec<u8>,
     cursor_range: Option<(usize, usize)>,
 ) {
+    if bytes.len() > crate::models::note::MAX_ATTACHMENT_SIZE {
+        app.show_toast(
+            "Image exceeds maximum 10 MB attachment limit",
+            ToastKind::Error,
+        );
+        return;
+    }
+
     if let Some(note) = app.active_note_mut() {
+        if note.attachments.len() >= crate::models::note::MAX_ATTACHMENTS_PER_NOTE {
+            app.show_toast("Note attachment limit reached (max 50)", ToastKind::Error);
+            return;
+        }
+
+        let total_size: usize = note.attachments.iter().map(|a| a.data.len()).sum();
+        if total_size + bytes.len() > crate::models::note::MAX_TOTAL_ATTACHMENTS_SIZE {
+            app.show_toast("Total attachments exceed 50 MB limit", ToastKind::Error);
+            return;
+        }
+
         let id = note.add_attachment(name, mime, bytes);
+        note.is_dirty = true;
         let tag = format!("![{}](attachment:{})", name, id);
         let s = cursor_range.map_or(note.char_len(), |(st, _)| st);
         crate::ui::context_menu::insert_or_replace_text(note, &tag, cursor_range);
@@ -403,11 +447,12 @@ pub fn attach_image_to_active_note_at_cursor(
         app.show_toast(format!("Pasted image: {}", name), ToastKind::Success);
     } else {
         let mut note = Note::new(
-            format!("note-{}", chrono::Local::now().timestamp_millis()),
+            crate::models::note::generate_unique_note_id(),
             "untitled.qn".to_string(),
         );
         let id = note.add_attachment(name, mime, bytes);
         note.content = format!("![{}](attachment:{})\n", name, id);
+        note.is_dirty = true;
         app.data.notes.push(note);
         app.is_dirty = true;
         app.show_toast(format!("Pasted image: {}", name), ToastKind::Success);

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 /// Maximum response body size captured in bytes (5 MB).
 pub const MAX_HTTP_RESPONSE_BYTES: usize = 5_242_880;
-/// Default timeout for HTTP operations.
-pub const HTTP_TIMEOUT_SECONDS: u64 = 10;
+/// Default timeout for HTTP operations (3 seconds to minimize UI latency).
+pub const HTTP_TIMEOUT_SECONDS: u64 = 3;
 
 /// Internal state for tracking HTTP request execution and results.
 #[derive(Debug, Clone, Default)]
@@ -72,17 +72,17 @@ impl HttpHandle {
         }
 
         match req.send() {
-            Ok(response) => {
+            Ok(mut response) => {
                 let status = response.status().as_u16() as i64;
                 self.set_status(status);
-                match response.bytes() {
-                    Ok(bytes) => {
-                        let mut b = bytes.to_vec();
-                        if b.len() > MAX_HTTP_RESPONSE_BYTES {
-                            b.truncate(MAX_HTTP_RESPONSE_BYTES);
-                        }
-                        String::from_utf8_lossy(&b).to_string()
-                    }
+                use std::io::Read;
+                let mut b = Vec::new();
+                match response
+                    .by_ref()
+                    .take(MAX_HTTP_RESPONSE_BYTES as u64)
+                    .read_to_end(&mut b)
+                {
+                    Ok(_) => String::from_utf8_lossy(&b).to_string(),
                     Err(e) => {
                         self.set_error(format!("Failed to read response body: {}", e));
                         String::new()
@@ -137,17 +137,17 @@ impl HttpHandle {
         }
 
         match req.send() {
-            Ok(response) => {
+            Ok(mut response) => {
                 let status = response.status().as_u16() as i64;
                 self.set_status(status);
-                match response.bytes() {
-                    Ok(bytes) => {
-                        let mut b = bytes.to_vec();
-                        if b.len() > MAX_HTTP_RESPONSE_BYTES {
-                            b.truncate(MAX_HTTP_RESPONSE_BYTES);
-                        }
-                        String::from_utf8_lossy(&b).to_string()
-                    }
+                use std::io::Read;
+                let mut b = Vec::new();
+                match response
+                    .by_ref()
+                    .take(MAX_HTTP_RESPONSE_BYTES as u64)
+                    .read_to_end(&mut b)
+                {
+                    Ok(_) => String::from_utf8_lossy(&b).to_string(),
                     Err(e) => {
                         self.set_error(format!("Failed to read response body: {}", e));
                         String::new()

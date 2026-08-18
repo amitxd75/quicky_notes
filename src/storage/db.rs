@@ -76,7 +76,7 @@ impl Database {
             ",
         )?;
 
-        // Migration: ensure attachments column exists for existing installations
+        // Migration: ensure attachments, is_dirty, has_disk_conflict, and last_disk_mtime_secs columns exist
         let has_attachments: bool = self
             .conn
             .query_row(
@@ -93,13 +93,38 @@ impl Database {
                 .execute("ALTER TABLE notes ADD COLUMN attachments TEXT", []);
         }
 
+        let has_dirty: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='is_dirty'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_dirty {
+            let _ = self.conn.execute(
+                "ALTER TABLE notes ADD COLUMN is_dirty INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+            let _ = self.conn.execute(
+                "ALTER TABLE notes ADD COLUMN has_disk_conflict INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+            let _ = self.conn.execute(
+                "ALTER TABLE notes ADD COLUMN last_disk_mtime_secs INTEGER",
+                [],
+            );
+        }
+
         Ok(())
     }
 
     /// Loads all notes ordered by tab position, plus the active note ID.
     pub fn load_all_notes(&self) -> Result<(Vec<Note>, Option<String>), rusqlite::Error> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, content, file_path, created_at, updated_at, pinned, color_tag, attachments FROM notes ORDER BY position ASC",
+            "SELECT id, title, content, file_path, created_at, updated_at, pinned, color_tag, attachments, is_dirty, has_disk_conflict, last_disk_mtime_secs FROM notes ORDER BY position ASC",
         )?;
 
         let note_iter = stmt.query_map([], |row| {
@@ -112,18 +137,26 @@ impl Database {
             let pinned_int: i64 = row.get(6)?;
             let color_tag: Option<String> = row.get(7)?;
             let attachments_raw: Option<String> = row.get(8)?;
+            let is_dirty_int: i64 = row.get(9).unwrap_or(0);
+            let has_disk_conflict_int: i64 = row.get(10).unwrap_or(0);
+            let last_disk_mtime_secs: Option<i64> = row.get(11).unwrap_or(None);
 
             let attachments: Vec<NoteAttachment> = attachments_raw
                 .as_deref()
                 .and_then(|json_str| serde_json::from_str(json_str).ok())
                 .unwrap_or_default();
 
+            let last_disk_mtime = last_disk_mtime_secs
+                .map(|s| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s as u64));
+
             Ok(Note {
                 id,
                 title,
                 content,
                 file_path,
-                last_disk_mtime: None,
+                last_disk_mtime,
+                is_dirty: is_dirty_int != 0,
+                has_disk_conflict: has_disk_conflict_int != 0,
                 created_at,
                 updated_at,
                 pinned: pinned_int != 0,
@@ -162,14 +195,27 @@ impl Database {
 
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO notes (id, title, content, file_path, created_at, updated_at, pinned, color_tag, position, attachments) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                "INSERT INTO notes (id, title, content, file_path, created_at, updated_at, pinned, color_tag, position, attachments, is_dirty, has_disk_conflict, last_disk_mtime_secs) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             )?;
 
+            let mut seen_ids = std::collections::HashSet::new();
             for (pos, note) in notes.iter().enumerate() {
+                let id = if note.id.trim().is_empty() || !seen_ids.insert(note.id.clone()) {
+                    let fallback = format!("{}_{}", note.id, pos + 1);
+                    seen_ids.insert(fallback.clone());
+                    fallback
+                } else {
+                    note.id.clone()
+                };
+
                 let attachments_json = serde_json::to_string(&note.attachments).unwrap_or_default();
+                let mtime_secs = note
+                    .last_disk_mtime
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64);
 
                 stmt.execute(params![
-                    note.id,
+                    id,
                     note.title,
                     note.content,
                     note.file_path,
@@ -178,7 +224,10 @@ impl Database {
                     if note.pinned { 1i64 } else { 0i64 },
                     note.color_tag,
                     pos as i64,
-                    attachments_json
+                    attachments_json,
+                    if note.is_dirty { 1i64 } else { 0i64 },
+                    if note.has_disk_conflict { 1i64 } else { 0i64 },
+                    mtime_secs,
                 ])?;
             }
         }
@@ -233,5 +282,53 @@ mod tests {
         assert_eq!(loaded_notes[0].attachments[0].data, vec![10, 20, 30, 40]);
         assert_eq!(loaded_notes[1].content, "Second content");
         assert_eq!(active_id, Some("id-2".into()));
+    }
+
+    #[test]
+    fn test_sqlite_save_all_notes_deduplicates_duplicate_ids() {
+        let mut db = Database::in_memory().expect("Failed to create in-memory database");
+
+        let mut note1 = Note::new("duplicate-id".into(), "First Note.qn".into());
+        note1.content = "First".into();
+
+        let mut note2 = Note::new("duplicate-id".into(), "Second Note.qn".into());
+        note2.content = "Second".into();
+
+        let notes = vec![note1, note2];
+        let res = db.save_all_notes(&notes, Some("duplicate-id"));
+        assert!(
+            res.is_ok(),
+            "save_all_notes should gracefully handle colliding IDs without SQL error"
+        );
+
+        let (loaded, _) = db.load_all_notes().expect("load should succeed");
+        assert_eq!(loaded.len(), 2);
+        assert_ne!(
+            loaded[0].id, loaded[1].id,
+            "Loaded note IDs should be unique"
+        );
+    }
+
+    #[test]
+    fn test_sqlite_persists_dirty_and_conflict_state() {
+        let mut db = Database::in_memory().expect("Failed to create in-memory database");
+
+        let mut note = Note::new("id-persist-state".into(), "test.txt".into());
+        note.is_dirty = true;
+        note.has_disk_conflict = true;
+        note.last_disk_mtime =
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(123456789));
+
+        db.save_all_notes(&[note], Some("id-persist-state"))
+            .expect("save should succeed");
+
+        let (loaded, _) = db.load_all_notes().expect("load should succeed");
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].is_dirty);
+        assert!(loaded[0].has_disk_conflict);
+        assert_eq!(
+            loaded[0].last_disk_mtime,
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(123456789))
+        );
     }
 }

@@ -31,9 +31,41 @@ pub const MAX_IMAGE_FONT_SCALE: f32 = 3.0;
 /// Minimum display width in pixels for rendered images.
 pub const MIN_IMAGE_DISPLAY_WIDTH: f32 = 32.0;
 
-/// Thread-safe in-memory cache for loaded GPU textures.
+/// Maximum number of loaded GPU textures retained in the LRU cache.
+pub const MAX_TEXTURE_CACHE_ENTRIES: usize = 64;
+
+/// Maximum image width or height in pixels.
+pub const MAX_IMAGE_DIMENSION: u32 = 8192;
+
+/// Maximum image total pixels (16 Megapixels).
+pub const MAX_IMAGE_PIXELS: u64 = 16_777_216;
+
+/// Thread-safe in-memory LRU cache for loaded GPU textures.
 struct TextureCache {
     textures: HashMap<String, TextureHandle>,
+    order: Vec<String>,
+}
+
+impl TextureCache {
+    fn insert(&mut self, key: String, handle: TextureHandle) {
+        if self.textures.len() >= MAX_TEXTURE_CACHE_ENTRIES
+            && !self.textures.contains_key(&key)
+            && let Some(oldest) = self.order.first().cloned()
+        {
+            self.order.remove(0);
+            self.textures.remove(&oldest);
+        }
+        self.order.retain(|k| k != &key);
+        self.order.push(key.clone());
+        self.textures.insert(key, handle);
+    }
+
+    fn touch(&mut self, key: &str) {
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            let k = self.order.remove(pos);
+            self.order.push(k);
+        }
+    }
 }
 
 static TEXTURE_CACHE: OnceLock<Mutex<TextureCache>> = OnceLock::new();
@@ -42,6 +74,7 @@ fn get_texture_cache() -> &'static Mutex<TextureCache> {
     TEXTURE_CACHE.get_or_init(|| {
         Mutex::new(TextureCache {
             textures: HashMap::new(),
+            order: Vec::new(),
         })
     })
 }
@@ -57,14 +90,15 @@ pub fn get_or_load_attachment_texture(
     let key = format!("{}:{}", note_id, att.id);
     let mut cache = get_texture_cache().lock().unwrap();
 
-    if let Some(tex) = cache.textures.get(&key) {
-        return Some(tex.clone());
+    if let Some(tex) = cache.textures.get(&key).cloned() {
+        cache.touch(&key);
+        return Some(tex);
     }
 
     match decode_color_image(&att.data) {
         Ok(color_img) => {
             let tex = ctx.load_texture(&key, color_img, TextureOptions::LINEAR);
-            cache.textures.insert(key, tex.clone());
+            cache.insert(key, tex.clone());
             Some(tex)
         }
         Err(err) => {
@@ -79,10 +113,23 @@ pub fn get_or_load_attachment_texture(
 
 /// Decodes raw image bytes (PNG, JPEG, WebP, GIF, BMP) into an `egui::ColorImage`.
 fn decode_color_image(bytes: &[u8]) -> Result<ColorImage, String> {
+    if bytes.is_empty() {
+        return Err("Empty image payload".to_string());
+    }
     let dyn_img =
         image::load_from_memory(bytes).map_err(|e| format!("Image decode failed: {}", e))?;
+    let (w, h) = (dyn_img.width(), dyn_img.height());
+    if w > MAX_IMAGE_DIMENSION
+        || h > MAX_IMAGE_DIMENSION
+        || (w as u64 * h as u64) > MAX_IMAGE_PIXELS
+    {
+        return Err(format!(
+            "Image dimensions {}x{} exceed maximum supported limit",
+            w, h
+        ));
+    }
     let rgba = dyn_img.to_rgba8();
-    let size = [rgba.width() as usize, rgba.height() as usize];
+    let size = [w as usize, h as usize];
     let pixels = rgba.into_raw();
     Ok(ColorImage::from_rgba_unmultiplied(size, &pixels))
 }

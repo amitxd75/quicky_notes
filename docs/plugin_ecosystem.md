@@ -407,13 +407,15 @@ fn launch_term(note, ui, system) {
 
 ---
 
-## 6. Security & Sandboxing Quotas
+## 6. Execution Model, Hardware Quotas & Security
 
-To guarantee smooth 60fps performance and total safety, the plugin runtime enforces strict hardware limits:
+To guarantee responsive UI performance and prevent runaway resource consumption, the Rhai runtime enforces strict execution limits:
 
-1. **Max Operations (`500,000` steps)**: Prevents hanging scripts from blocking the UI thread.
+1. **Max Operations (`500,000` steps)**: Prevents hanging script loops from blocking the UI thread.
 2. **Max Call Depth (`50` frames)**: Protects against stack overflow from uncontrolled recursion.
 3. **Max String Size (`5 MB`)**: Bounds heap allocations inside scripts.
-4. **Max HTTP Payload (`5 MB`)**: Prevents oversized network responses from causing OOM errors.
+4. **Max HTTP Payload (`5 MB`)**: Bounded streaming prevents oversized network responses from causing excessive memory usage.
 5. **HTTP Timeout (`10 Seconds`)**: All network calls time out automatically.
-6. **Path Traversal Protection**: Folder opening and terminal spawning enforce safe directory boundaries.
+6. **Synchronous Process Timeout (`5 Seconds`)**: All synchronous system commands time out and terminate automatically.
+7. **Path Traversal Protection**: Folder opening, terminal spawning, and plugin persistent key-value storage enforce safe directory boundaries.
+8. **Trust & Permissions**: Plugins execute with user privileges when invoking host system APIs (`system.exec`, `system.exec_sync`). Only install plugins from trusted sources.

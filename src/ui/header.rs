@@ -179,10 +179,19 @@ fn render_tabs_list(
                     let tab_btn = if note.is_linked_file() {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
+                            let icon = if note.has_disk_conflict {
+                                "⚠️"
+                            } else {
+                                "🔗"
+                            };
                             ui.label(
-                                RichText::new("🔗")
+                                RichText::new(icon)
                                     .font(FontId::proportional(12.0))
-                                    .color(Color32::WHITE),
+                                    .color(if note.has_disk_conflict {
+                                        palette.danger
+                                    } else {
+                                        Color32::WHITE
+                                    }),
                             );
                             ui.add(
                                 egui::Label::new(
@@ -206,10 +215,17 @@ fn render_tabs_list(
                     };
 
                     let tooltip = if let Some(ref fp) = note.file_path {
-                        format!(
-                            "📁 Linked File Path:\n{}\n\n• Click to switch\n• Right-click for options / copy path\n• Double-click to rename",
-                            fp
-                        )
+                        if note.has_disk_conflict {
+                            format!(
+                                "⚠️ DISK CONFLICT: File modified externally while you have unsaved edits!\n\n📁 Linked File Path:\n{}\n\n• Right-click tab to Reload or Force Save\n• Click to switch",
+                                fp
+                            )
+                        } else {
+                            format!(
+                                "📁 Linked File Path:\n{}\n\n• Click to switch\n• Right-click for options / copy path\n• Double-click to rename",
+                                fp
+                            )
+                        }
                     } else {
                         format!(
                             "📝 Note: {}\nQuicky Notes internal storage\n\n• Click to switch\n• Right-click for options\n• Double-click to rename",
@@ -220,6 +236,14 @@ fn render_tabs_list(
 
                     // Right-click context menu on tab
                     tab_btn.context_menu(|ui| {
+                        if note.has_disk_conflict {
+                            ui.label(
+                                RichText::new("⚠️ External Conflict Detected")
+                                    .color(palette.danger)
+                                    .strong(),
+                            );
+                            ui.separator();
+                        }
                         let pin_label = if note.pinned {
                             "Unpin Tab"
                         } else {

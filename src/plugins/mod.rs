@@ -199,10 +199,32 @@ impl PluginManager {
         };
 
         let builder_name = builder.get_name();
-        let id = if builder_name.is_empty() {
+        let raw_id = if builder_name.is_empty() {
             file_stem.clone()
         } else {
-            builder_name.to_lowercase().replace(' ', "_")
+            builder_name.clone()
+        };
+
+        // Strictly sanitize slug to lowercase alphanumeric, dashes and underscores
+        let mut clean_slug: String = raw_id
+            .to_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        while clean_slug.contains("__") {
+            clean_slug = clean_slug.replace("__", "_");
+        }
+        let clean_slug = clean_slug.trim_matches('_').trim_matches('-');
+        let id = if clean_slug.is_empty() {
+            file_stem.clone()
+        } else {
+            clean_slug.to_string()
         };
 
         let is_disabled = disabled_ids.contains(&id);
@@ -701,5 +723,33 @@ mod tests {
         let toasts = ui.take_toasts();
         assert_eq!(toasts.len(), 1);
         assert_eq!(toasts[0].0, "Count: 42");
+    }
+
+    #[test]
+    fn test_plugin_storage_path_traversal_blocked() {
+        let temp_dir = std::env::temp_dir().join("quicky_test_plugins_data");
+        let _ = fs::create_dir_all(&temp_dir);
+
+        // Attempt traversal with relative dot segments
+        assert!(
+            crate::plugins::api::storage_api::safe_storage_path(&temp_dir, "../config").is_none()
+        );
+        assert!(
+            crate::plugins::api::storage_api::safe_storage_path(&temp_dir, "..\\config").is_none()
+        );
+        assert!(
+            crate::plugins::api::storage_api::safe_storage_path(&temp_dir, "/etc/passwd").is_none()
+        );
+        assert!(
+            crate::plugins::api::storage_api::safe_storage_path(&temp_dir, ".hidden").is_none()
+        );
+
+        // Valid slug should succeed
+        let valid_path =
+            crate::plugins::api::storage_api::safe_storage_path(&temp_dir, "my_plugin-1");
+        assert!(valid_path.is_some());
+        assert_eq!(valid_path.unwrap(), temp_dir.join("my_plugin-1.json"));
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

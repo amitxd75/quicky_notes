@@ -1,7 +1,8 @@
-//! Local credential security and API key obfuscation.
+//! Local credential masking and API key obfuscation.
 //!
-//! Protects API keys from plaintext exposure in dotfiles and JSON backups
-//! using machine-salted reversible obfuscation (`enc:v1:<base64>`).
+//! Prevents API keys from casual plaintext exposure in dotfiles and JSON configuration
+//! using reversible machine-derived XOR masking (`enc:v1:<base64>`). Note that this is UI masking
+//! against casual inspection, not hardware-backed cryptographic storage.
 
 use std::fs;
 
