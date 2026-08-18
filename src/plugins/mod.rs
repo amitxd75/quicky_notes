@@ -82,35 +82,9 @@ impl PluginManager {
             error_log: Vec::new(),
         };
 
-        // Create default template scripts if directory is empty
-        manager.ensure_default_templates();
+        // Load existing plugins if any (do not auto-install default templates)
         manager.load_plugins(&[]);
         manager
-    }
-
-    /// Generates default starter template plugins if the plugins directory contains no `.rhai` files.
-    pub fn ensure_default_templates(&self) {
-        let _ = fs::create_dir_all(&self.plugins_dir);
-
-        let term_path = self.plugins_dir.join("quick_terminal.rhai");
-        if !term_path.exists() {
-            let _ = fs::write(&term_path, templates::QUICK_TERMINAL_TEMPLATE);
-        }
-
-        let pomo_path = self.plugins_dir.join("pomodoro_timer.rhai");
-        if !pomo_path.exists() {
-            let _ = fs::write(&pomo_path, templates::POMODORO_TIMER_TEMPLATE);
-        }
-
-        let quote_path = self.plugins_dir.join("quote_of_the_day.rhai");
-        if !quote_path.exists() {
-            let _ = fs::write(&quote_path, templates::QUOTE_OF_THE_DAY_TEMPLATE);
-        }
-
-        let theme_path = self.plugins_dir.join("custom_theme_cycler.rhai");
-        if !theme_path.exists() {
-            let _ = fs::write(&theme_path, templates::CUSTOM_THEME_CYCLER_TEMPLATE);
-        }
     }
 
     /// Forcefully recreates the built-in starter templates.
