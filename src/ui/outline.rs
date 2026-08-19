@@ -473,12 +473,12 @@ pub fn render_outline_sidebar(
     );
     let mut navigation_target = None;
 
-    let header_font_size = (ui_font_size + 0.5).clamp(11.0, 24.0);
-    let filter_font_size = (ui_font_size - 1.5).clamp(10.0, 20.0);
-    let item_font_size = (ui_font_size - 1.5).clamp(10.0, 22.0);
-    let h1_font_size = (ui_font_size - 1.0).clamp(10.5, 22.5);
-    let badge_font_size = (ui_font_size - 3.0).clamp(9.0, 18.0);
-    let line_font_size = (ui_font_size - 3.5).clamp(8.5, 16.0);
+    let header_font_size = ui_font_size.clamp(10.5, 22.0);
+    let filter_font_size = (ui_font_size - 2.0).clamp(9.5, 18.0);
+    let item_font_size = (ui_font_size - 2.5).clamp(9.0, 19.0);
+    let h1_font_size = (ui_font_size - 2.0).clamp(9.5, 20.0);
+    let badge_font_size = (ui_font_size - 3.5).clamp(8.5, 16.0);
+    let line_font_size = (ui_font_size - 4.0).clamp(8.0, 15.0);
 
     let frame_margin = Margin::symmetric(8, 6);
     let inner_height = (height - (frame_margin.top + frame_margin.bottom) as f32).max(20.0);
