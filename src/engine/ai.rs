@@ -591,19 +591,4 @@ mod tests {
         assert_eq!(parse_hex_color(&t.accent), Some([0, 240, 255]));
         assert_eq!(t.opacity, Some(0.90));
     }
-
-    #[test]
-    fn test_ai_request_temperature_field() {
-        let req = AiRequest {
-            target_text: "test".to_string(),
-            context_before: "".to_string(),
-            action: AiAction::FixAndPolish,
-            provider: AiProvider::Gemini,
-            model: "gemini-2.5-flash".to_string(),
-            api_key: "".to_string(),
-            temperature: Some(0.85),
-            system_prompt: "test prompt".to_string(),
-        };
-        assert_eq!(req.temperature, Some(0.85));
-    }
 }

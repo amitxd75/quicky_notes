@@ -11,6 +11,7 @@ pub mod markdown;
 
 pub mod options;
 pub use options as options_drawer;
+pub mod outline;
 pub mod search_drawer;
 pub mod shortcuts;
 pub mod syntax;

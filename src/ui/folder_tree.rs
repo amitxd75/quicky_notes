@@ -262,6 +262,9 @@ pub fn render_folder_sidebar(
     let btn_font_size = ui_font_size.clamp(10.0, 24.0);
     let filter_font_size = (ui_font_size - 0.5).clamp(10.0, 22.0);
 
+    let frame_margin = Margin::symmetric(6, 6);
+    let inner_height = (height - (frame_margin.top + frame_margin.bottom) as f32).max(20.0);
+
     egui::Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
             palette.bg.r(),
@@ -271,12 +274,12 @@ pub fn render_folder_sidebar(
         ))
         .stroke(Stroke::new(1.0, Palette::with_alpha(palette.border, 70)))
         .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(6, 6))
+        .inner_margin(frame_margin)
         .show(ui, |ui| {
             ui.set_width(workspace.sidebar_width);
-            ui.set_height(height);
-            ui.set_min_height(height);
-            ui.set_max_height(height);
+            ui.set_height(inner_height);
+            ui.set_min_height(inner_height);
+            ui.set_max_height(inner_height);
 
             ui.vertical(|ui| {
                 // Top header of Folder Explorer

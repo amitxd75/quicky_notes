@@ -763,5 +763,5 @@ pub fn icon_button(
 
 /// Renders a modern sleek drawer close icon button (×).
 pub fn close_button(ui: &mut Ui, palette: &Palette) -> egui::Response {
-    icon_button(ui, "×", false, palette, 13.0, egui::vec2(28.0, 28.0)).on_hover_text("Close (Esc)")
+    icon_button(ui, "×", false, palette, 13.0, egui::vec2(28.0, 28.0))
 }

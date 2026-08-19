@@ -149,6 +149,24 @@ pub struct QuickyNotesApp {
 
     /// Temporary accent color override set dynamically by plugins.
     pub custom_accent_override: Option<Color32>,
+
+    /// Whether the document outline / symbol navigator sidebar is currently visible.
+    pub show_outline: bool,
+
+    /// Width of the outline sidebar in pixels.
+    pub outline_width: f32,
+
+    /// Real-time search filter for document outline symbols.
+    pub outline_filter: String,
+
+    /// Selected symbol index in outline sidebar when navigating with arrow keys.
+    pub selected_outline_idx: Option<usize>,
+
+    /// Pending character offset to jump editor cursor and scroll to.
+    pub jump_to_char: Option<usize>,
+
+    /// Target character offset and start timestamp for navigation focus pulse glow animation.
+    pub nav_flash_animation: Option<(usize, Instant)>,
 }
 
 /// Active bottom console / output panel state displayed below the editor.
@@ -249,6 +267,12 @@ impl QuickyNotesApp {
             active_plugin_panel: None,
             plugin_timer_last_fired: std::collections::HashMap::new(),
             custom_accent_override: None,
+            show_outline: false,
+            outline_width: crate::ui::outline::DEFAULT_OUTLINE_WIDTH,
+            outline_filter: String::new(),
+            selected_outline_idx: None,
+            jump_to_char: None,
+            nav_flash_animation: None,
         }
     }
 
@@ -987,6 +1011,12 @@ mod tests {
             active_plugin_panel: None,
             plugin_timer_last_fired: std::collections::HashMap::new(),
             custom_accent_override: None,
+            show_outline: false,
+            outline_width: crate::ui::outline::DEFAULT_OUTLINE_WIDTH,
+            outline_filter: String::new(),
+            selected_outline_idx: None,
+            jump_to_char: None,
+            nav_flash_animation: None,
         }
     }
 

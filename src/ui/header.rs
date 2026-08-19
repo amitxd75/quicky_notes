@@ -23,8 +23,8 @@ pub const WINDOW_CTRL_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 /// Options / search button dimensions in pixels.
 pub const OPTIONS_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 
-/// Base width reserved for right-side action controls (Close, Settings, Search, File/Folder buttons, dividers).
-pub const RIGHT_CONTROLS_BASE_WIDTH: f32 = 236.0;
+/// Base width reserved for right-side action controls (Close, Settings, Search, Outline, File/Folder buttons, dividers).
+pub const RIGHT_CONTROLS_BASE_WIDTH: f32 = 272.0;
 /// Additional width reserved when a folder workspace is open (sidebar toggle button).
 pub const RIGHT_CONTROLS_FOLDER_WIDTH: f32 = 36.0;
 /// Additional width reserved when active note is Markdown (preview mode button).
@@ -93,6 +93,65 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
     });
 }
 
+/// Renders a dedicated mini interactive tab close button with smooth hover glow and tactile click.
+fn mini_tab_close_button(ui: &mut Ui, id: egui::Id) -> egui::Response {
+    let size = egui::vec2(16.0, 16.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let is_hovered = response.hovered();
+    let is_pressed = response.is_pointer_button_down_on();
+
+    let hov_anim = ui
+        .ctx()
+        .animate_bool_responsive(id.with("x_hov"), is_hovered);
+    let press_anim = ui
+        .ctx()
+        .animate_bool_responsive(id.with("x_press"), is_pressed);
+
+    if hov_anim > 0.01 {
+        let hover_bg = Color32::from_rgba_unmultiplied(239, 68, 68, (45.0 * hov_anim) as u8);
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(4), hover_bg);
+        let border_col = Color32::from_rgba_unmultiplied(248, 113, 113, (110.0 * hov_anim) as u8);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(4),
+            Stroke::new(1.0, border_col),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    let cross_color = if hov_anim > 0.01 {
+        theme::Palette::interpolate_color(Color32::from_gray(160), Color32::WHITE, hov_anim)
+    } else {
+        Color32::from_gray(135)
+    };
+
+    let y_depress = if press_anim > 0.01 {
+        0.5 * press_anim
+    } else {
+        0.0
+    };
+    let center = egui::pos2(rect.center().x, rect.center().y + y_depress);
+    let half = 3.5_f32;
+    let cross_stroke = Stroke::new(1.3_f32, cross_color);
+    ui.painter().line_segment(
+        [
+            egui::pos2(center.x - half, center.y - half),
+            egui::pos2(center.x + half, center.y + half),
+        ],
+        cross_stroke,
+    );
+    ui.painter().line_segment(
+        [
+            egui::pos2(center.x + half, center.y - half),
+            egui::pos2(center.x - half, center.y + half),
+        ],
+        cross_stroke,
+    );
+
+    response
+}
+
 /// Renders the scrollable list of note tabs with selection, pinning, renaming, and closing.
 fn render_tabs_list(
     app: &mut QuickyNotesApp,
@@ -113,32 +172,46 @@ fn render_tabs_list(
         let is_editing =
             app.editing_title.as_ref().map(|(id, _)| id.as_str()) == Some(note.id.as_str());
 
-        let active_anim = ctx.animate_bool_with_time(
-            egui::Id::new((&note.id, "tab_anim")),
-            is_active,
-            TAB_ANIM_TIME_SECS,
-        );
+        let tab_id = egui::Id::new((&note.id, "tab_item"));
+
+        let active_anim =
+            ctx.animate_bool_with_time(tab_id.with("tab_anim"), is_active, TAB_ANIM_TIME_SECS);
+
+        let tab_hov_id = tab_id.with("hov");
+        let prev_hov: bool = ctx.data(|d| d.get_temp(tab_hov_id)).unwrap_or(false);
+        let tab_hov_anim = ctx.animate_bool_responsive(tab_hov_id, prev_hov && !is_active);
 
         let active_tint = theme::Palette::interpolate_color(palette.card, palette.accent, 0.35);
         let base_tab_bg = theme::Palette::with_alpha(palette.card, 160);
-        let target_tab_bg = theme::Palette::with_alpha(active_tint, 240);
-        let tab_bg = theme::Palette::interpolate_color(base_tab_bg, target_tab_bg, active_anim);
+        let hovered_tab_bg = theme::Palette::lighten(palette.card, 22, 215);
+        let target_tab_bg = theme::Palette::with_alpha(active_tint, 245);
 
-        let base_stroke = theme::Palette::with_alpha(palette.border, 90);
-        let target_stroke = theme::Palette::with_alpha(palette.accent, 180);
-        let stroke_color =
-            theme::Palette::interpolate_color(base_stroke, target_stroke, active_anim);
-        let tab_stroke = Stroke::new(1.0 + active_anim * 0.2, stroke_color);
+        let tab_bg = if active_anim > 0.01 {
+            theme::Palette::interpolate_color(base_tab_bg, target_tab_bg, active_anim)
+        } else {
+            theme::Palette::interpolate_color(base_tab_bg, hovered_tab_bg, tab_hov_anim)
+        };
+
+        let base_stroke = theme::Palette::with_alpha(palette.border, 75);
+        let hovered_stroke = theme::Palette::with_alpha(palette.border, 150);
+        let target_stroke = theme::Palette::with_alpha(palette.accent, 190);
+
+        let stroke_color = if active_anim > 0.01 {
+            theme::Palette::interpolate_color(base_stroke, target_stroke, active_anim)
+        } else {
+            theme::Palette::interpolate_color(base_stroke, hovered_stroke, tab_hov_anim)
+        };
+        let tab_stroke = Stroke::new(1.0 + active_anim * 0.25, stroke_color);
 
         let tab_frame = egui::Frame::NONE
             .fill(tab_bg)
             .stroke(tab_stroke)
             .corner_radius(CornerRadius::same(TAB_CORNER_RADIUS))
-            .inner_margin(Margin::symmetric(12, 6));
+            .inner_margin(Margin::symmetric(10, 5));
 
-        tab_frame.show(ui, |ui| {
+        let frame_resp = tab_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().item_spacing.x = 5.0;
 
                 // Pin icon indicator for pinned notes
                 if note.pinned {
@@ -147,13 +220,30 @@ fn render_tabs_list(
                         tab_to_pin = Some(note.id.clone());
                     }
                 } else if is_active {
-                    ui.label(RichText::new("●").size(11.0).color(palette.accent));
+                    let (dot_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(7.0, 7.0), Sense::hover());
+                    ui.painter()
+                        .circle_filled(dot_rect.center(), 2.8, palette.accent);
+                    if active_anim > 0.3 {
+                        let glow_alpha = (70.0 * active_anim) as u8;
+                        let glow_col = Color32::from_rgba_unmultiplied(
+                            palette.accent.r(),
+                            palette.accent.g(),
+                            palette.accent.b(),
+                            glow_alpha,
+                        );
+                        ui.painter().circle_stroke(
+                            dot_rect.center(),
+                            4.2,
+                            Stroke::new(1.0, glow_col),
+                        );
+                    }
                 }
 
                 // Editable Title or Clickable Label
                 if is_editing && let Some((_, ref mut buf)) = app.editing_title {
                     let title_edit = egui::TextEdit::singleline(buf)
-                        .font(FontId::proportional(13.0))
+                        .font(FontId::proportional(12.5))
                         .text_color(Color32::WHITE)
                         .frame(egui::Frame::NONE)
                         .desired_width(TITLE_EDIT_DESIRED_WIDTH);
@@ -172,139 +262,137 @@ fn render_tabs_list(
 
                     let title_color = if is_active {
                         Color32::WHITE
-                    } else {
-                        Color32::from_gray(190)
-                    };
-
-                    let tab_btn = if note.is_linked_file() {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let icon = if note.has_disk_conflict {
-                                "⚠️"
-                            } else {
-                                "🔗"
-                            };
-                            ui.label(
-                                RichText::new(icon)
-                                    .font(FontId::proportional(12.0))
-                                    .color(if note.has_disk_conflict {
-                                        palette.danger
-                                    } else {
-                                        Color32::WHITE
-                                    }),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(base_title)
-                                        .font(FontId::proportional(13.0))
-                                        .color(title_color),
-                                )
-                                .sense(Sense::click()),
-                            )
-                        })
-                        .inner
-                    } else {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(base_title)
-                                    .font(FontId::proportional(13.0))
-                                    .color(title_color),
-                            )
-                            .sense(Sense::click()),
+                    } else if tab_hov_anim > 0.01 {
+                        theme::Palette::interpolate_color(
+                            Color32::from_gray(185),
+                            Color32::from_gray(230),
+                            tab_hov_anim,
                         )
-                    };
-
-                    let tooltip = if let Some(ref fp) = note.file_path {
-                        if note.has_disk_conflict {
-                            format!(
-                                "⚠️ DISK CONFLICT: File modified externally while you have unsaved edits!\n\n📁 Linked File Path:\n{}\n\n• Right-click tab to Reload or Force Save\n• Click to switch",
-                                fp
-                            )
-                        } else {
-                            format!(
-                                "📁 Linked File Path:\n{}\n\n• Click to switch\n• Right-click to rename or view options",
-                                fp
-                            )
-                        }
                     } else {
-                        format!(
-                            "📝 Note: {}\nQuicky Notes internal storage\n\n• Click to switch\n• Right-click to rename or view options",
-                            base_title
-                        )
+                        Color32::from_gray(185)
                     };
-                    let tab_btn = tab_btn.on_hover_text(tooltip);
 
-                    // Right-click context menu on tab
-                    tab_btn.context_menu(|ui| {
-                        if note.has_disk_conflict {
-                            ui.label(
-                                RichText::new("⚠️ External Conflict Detected")
-                                    .color(palette.danger)
-                                    .strong(),
-                            );
-                            ui.separator();
-                        }
-                        let pin_label = if note.pinned {
-                            "Unpin Tab"
+                    if note.is_linked_file() {
+                        let icon = if note.has_disk_conflict {
+                            "⚠️"
                         } else {
-                            "Pin Tab 📌"
+                            "🔗"
                         };
-                        if ui.button(pin_label).clicked() {
-                            tab_to_pin = Some(note.id.clone());
-                            ui.close();
-                        }
-                        if ui.button("Rename").clicked() {
-                            app.editing_title = Some((note.id.clone(), note.title.clone()));
-                            ui.close();
-                        }
-                        if let Some(ref fp) = note.file_path {
-                            ui.separator();
-                            if ui.button("🔄 Reload from Disk").clicked() {
-                                tab_to_reload = Some(note.id.clone());
-                                ui.close();
-                            }
-                            if ui.button("💾 Save to Disk Now").clicked() {
-                                tab_to_save_disk = true;
-                                ui.close();
-                            }
-                            if ui.button("📋 Copy File Path").clicked() {
-                                ui.ctx().copy_text(fp.clone());
-                                ui.close();
-                            }
-                            if ui.button("📂 Open in File Manager").clicked() {
-                                if let Some(parent) = std::path::Path::new(fp).parent() {
-                                    crate::ui::drag_drop::safe_open_folder(parent);
-                                }
-                                ui.close();
-                            }
-                        }
-                        ui.separator();
-                        if ui.button("Close").clicked() {
-                            tab_to_close = Some(note.id.clone());
-                            ui.close();
-                        }
-                    });
-
-                    if tab_btn.clicked() {
-                        tab_to_select = Some(note.id.clone());
+                        ui.label(RichText::new(icon).font(FontId::proportional(11.5)).color(
+                            if note.has_disk_conflict {
+                                palette.danger
+                            } else {
+                                Color32::WHITE
+                            },
+                        ));
                     }
+
+                    ui.label(
+                        RichText::new(base_title)
+                            .font(FontId::proportional(12.5))
+                            .color(title_color),
+                    );
                 }
 
-                // Close "x" button inside tab
+                // Dedicated interactive close "x" button inside tab
                 if app.data.notes.len() > 1 {
-                    let close_x = ui.add(
-                        egui::Label::new(
-                            RichText::new("×")
-                                .font(FontId::proportional(13.0))
-                                .color(Color32::from_gray(140)),
-                        )
-                        .sense(Sense::click()),
-                    );
-                    if close_x.on_hover_text("Close tab").clicked() {
+                    ui.add_space(1.0);
+                    let close_btn =
+                        mini_tab_close_button(ui, tab_id.with("x")).on_hover_text("Close tab");
+                    if close_btn.clicked() {
                         tab_to_close = Some(note.id.clone());
                     }
                 }
             });
+        });
+
+        let is_tab_hovered = frame_resp.response.hovered();
+        ctx.data_mut(|d| d.insert_temp(tab_hov_id, is_tab_hovered));
+
+        let base_title = if note.title.trim().is_empty() {
+            crate::models::DEFAULT_NOTE_TITLE
+        } else {
+            &note.title
+        };
+
+        let tooltip = if let Some(ref fp) = note.file_path {
+            if note.has_disk_conflict {
+                format!(
+                    "⚠️ DISK CONFLICT: File modified externally while you have unsaved edits!\n\n📁 Linked File Path:\n{}\n\n• Right-click tab to Reload or Force Save\n• Click to switch",
+                    fp
+                )
+            } else {
+                format!(
+                    "📁 Linked File Path:\n{}\n\n• Click to switch\n• Right-click to rename or view options",
+                    fp
+                )
+            }
+        } else {
+            format!(
+                "📝 Note: {}\nQuicky Notes internal storage\n\n• Click to switch\n• Right-click to rename or view options",
+                base_title
+            )
+        };
+
+        let tab_interact = frame_resp
+            .response
+            .interact(Sense::click())
+            .on_hover_text(tooltip);
+
+        // Click anywhere on the tab to switch
+        if tab_interact.clicked() && !is_editing {
+            tab_to_select = Some(note.id.clone());
+        }
+
+        // Right-click context menu on tab
+        tab_interact.context_menu(|ui| {
+            if note.has_disk_conflict {
+                ui.label(
+                    RichText::new("⚠️ External Conflict Detected")
+                        .color(palette.danger)
+                        .strong(),
+                );
+                ui.separator();
+            }
+            let pin_label = if note.pinned {
+                "Unpin Tab"
+            } else {
+                "Pin Tab 📌"
+            };
+            if ui.button(pin_label).clicked() {
+                tab_to_pin = Some(note.id.clone());
+                ui.close();
+            }
+            if ui.button("Rename").clicked() {
+                app.editing_title = Some((note.id.clone(), note.title.clone()));
+                ui.close();
+            }
+            if let Some(ref fp) = note.file_path {
+                ui.separator();
+                if ui.button("🔄 Reload from Disk").clicked() {
+                    tab_to_reload = Some(note.id.clone());
+                    ui.close();
+                }
+                if ui.button("💾 Save to Disk Now").clicked() {
+                    tab_to_save_disk = true;
+                    ui.close();
+                }
+                if ui.button("📋 Copy File Path").clicked() {
+                    ui.ctx().copy_text(fp.clone());
+                    ui.close();
+                }
+                if ui.button("📂 Open in File Manager").clicked() {
+                    if let Some(parent) = std::path::Path::new(fp).parent() {
+                        crate::ui::drag_drop::safe_open_folder(parent);
+                    }
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("Close").clicked() {
+                tab_to_close = Some(note.id.clone());
+                ui.close();
+            }
         });
     }
 
@@ -406,7 +494,23 @@ fn render_right_controls(
         ctx.request_repaint();
     }
 
-    // 4. Markdown Preview Mode Button (📝 / ◫ / 👁)
+    // 4. Document Outline & Symbols 📑 Button
+    let outline_btn =
+        button::icon_button(ui, "📑", app.show_outline, palette, 14.0, OPTIONS_BTN_SIZE);
+    let outline_tooltip = format!(
+        "Document Outline & Symbols ({})",
+        app.shortcut_label(crate::ui::shortcuts::ShortcutAction::ToggleOutline)
+    );
+    if outline_btn.on_hover_text(outline_tooltip).clicked() {
+        app.show_outline = !app.show_outline;
+        if app.show_outline {
+            app.show_options = false;
+            app.show_search = false;
+        }
+        ctx.request_repaint();
+    }
+
+    // 5. Markdown Preview Mode Button (📝 / ◫ / 👁)
     if app.active_note().is_some_and(|n| n.is_markdown()) {
         let md_active = app.preview_mode != crate::app::MarkdownViewMode::Edit;
         let md_btn = button::icon_button(

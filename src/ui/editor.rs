@@ -29,6 +29,9 @@ pub const GUTTER_CHUNK_SIZE: usize = 100;
 /// Minimum vertical height for multiline text editor canvas in pixels.
 pub const MIN_EDITOR_HEIGHT: f32 = 300.0;
 
+/// Width in pixels of the draggable separator between editor and sidebars.
+pub const SIDEBAR_RESIZER_WIDTH: f32 = 8.0;
+
 /// Computes line number gutter column width based on document line count and font size.
 #[inline]
 pub fn compute_gutter_width(line_count: usize, font_size: f32) -> f32 {
@@ -135,7 +138,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
             );
             if (new_size - app.data.settings.editor.font_size).abs() > 0.01 {
                 app.data.settings.editor.font_size = new_size;
-                app.set_status(format!("Zoom: {:.1}pt", new_size));
+                app.set_status(format!("Editor font size: {:.1}pt (saved)", new_size));
                 app.is_dirty = true;
                 let _ = crate::storage::AppData::save_settings_to_path(
                     &app.data.settings,
@@ -180,6 +183,12 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
     let notes = &mut app.data.notes;
     let split_ratio = &mut app.split_ratio;
     let active_plugin_panel = &mut app.active_plugin_panel;
+    let jump_to_char = &mut app.jump_to_char;
+    let nav_flash_animation = &mut app.nav_flash_animation;
+    let outline_filter = &mut app.outline_filter;
+    let selected_outline_idx = &mut app.selected_outline_idx;
+    let show_outline = &mut app.show_outline;
+    let outline_width = &mut app.outline_width;
     let mut bottom_panel_action = None;
 
     let total_width = ui.available_width();
@@ -202,7 +211,18 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
         0.0
     };
     let sep_width = if show_sidebar { 8.0 } else { 0.0 };
-    let editor_width = (total_width - sidebar_width - sep_width).max(100.0);
+
+    let cur_outline_w = if *show_outline {
+        outline_width.clamp(
+            crate::ui::outline::MIN_OUTLINE_WIDTH,
+            crate::ui::outline::MAX_OUTLINE_WIDTH,
+        )
+    } else {
+        0.0
+    };
+    let outline_sep_width = if *show_outline { 8.0 } else { 0.0 };
+    let editor_width =
+        (total_width - sidebar_width - sep_width - cur_outline_w - outline_sep_width).max(100.0);
 
     ui.horizontal_top(|ui| {
         if show_sidebar {
@@ -310,6 +330,8 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                         &mut content_changed,
                                         &plugin_menu_items,
                                         &mut context_menu_action,
+                                        jump_to_char,
+                                        *nav_flash_animation,
                                     );
                                 });
                         }
@@ -332,13 +354,15 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                             );
                                         });
                                     } else {
-                                        crate::ui::markdown::render_markdown(
+                                        crate::ui::markdown::render_markdown_with_navigation(
                                             ui,
                                             &note.content,
                                             font_size,
                                             is_monospace,
                                             &palette,
                                             Some(note),
+                                            jump_to_char,
+                                            *nav_flash_animation,
                                         );
                                     }
                                 });
@@ -401,6 +425,8 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                                     &mut content_changed,
                                                     &plugin_menu_items,
                                                     &mut context_menu_action,
+                                                    jump_to_char,
+                                                    *nav_flash_animation,
                                                 );
                                             });
                                     },
@@ -455,13 +481,16 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                                         );
                                                     });
                                                 } else {
-                                                    crate::ui::markdown::render_markdown(
+                                                    let mut split_jump = *jump_to_char;
+                                                    crate::ui::markdown::render_markdown_with_navigation(
                                                         ui,
                                                         &note.content,
                                                         font_size,
                                                         is_monospace,
                                                         &palette,
                                                         Some(note),
+                                                        &mut split_jump,
+                                                        *nav_flash_animation,
                                                     );
                                                 }
                                             });
@@ -534,6 +563,84 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                 }
             },
         );
+
+        // Right-hand Document Outline / Symbol Navigator sidebar
+        if *show_outline {
+            let (div_rect, div_resp) = ui.allocate_exact_size(
+                egui::vec2(outline_sep_width, full_height),
+                egui::Sense::click_and_drag(),
+            );
+            if div_resp.hovered() || div_resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            if div_resp.dragged() {
+                let delta_x = ui.input(|i| i.pointer.delta().x);
+                *outline_width = (*outline_width - delta_x).clamp(
+                    crate::ui::outline::MIN_OUTLINE_WIDTH,
+                    crate::ui::outline::MAX_OUTLINE_WIDTH,
+                );
+            }
+            let div_color = if div_resp.hovered() || div_resp.dragged() {
+                palette.accent
+            } else {
+                Palette::with_alpha(palette.border, 90)
+            };
+            let center_x = div_rect.center().x;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(center_x, div_rect.min.y),
+                    egui::pos2(center_x, div_rect.max.y),
+                ],
+                Stroke::new(1.0, div_color),
+            );
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(cur_outline_w, full_height),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    let symbols = if let Some(ref active_id) = active_id_opt
+                        && let Some(note) = notes.iter().find(|n| &n.id == active_id)
+                    {
+                        crate::ui::outline::extract_document_symbols(
+                            &note.content,
+                            note.is_markdown(),
+                            note.file_path.as_deref(),
+                        )
+                    } else {
+                        Vec::new()
+                    };
+
+                    let active_sym_idx = last_cursor_range
+                        .as_ref()
+                        .and_then(|(start, _)| crate::ui::outline::find_active_symbol_index(&symbols, *start));
+
+                    let mut close_outline = false;
+                    let mut config = crate::ui::outline::OutlineRenderConfig {
+                        symbols: &symbols,
+                        active_symbol_idx: active_sym_idx,
+                        selected_idx: selected_outline_idx,
+                        filter_query: outline_filter,
+                        palette: &palette,
+                        height: full_height,
+                        ui_font_size: app.data.settings.appearance.ui_font_size,
+                    };
+                    let nav_target = crate::ui::outline::render_outline_sidebar(
+                        &mut config,
+                        ui,
+                        &mut close_outline,
+                    );
+
+                    if close_outline {
+                        *show_outline = false;
+                    }
+
+                    if let Some((target_char, _line)) = nav_target {
+                        *jump_to_char = Some(target_char);
+                        *nav_flash_animation = Some((target_char, std::time::Instant::now()));
+                    }
+                },
+            );
+        }
     });
 
     if content_changed {
@@ -1197,6 +1304,8 @@ fn render_multiline_editor_pane(
     content_changed: &mut bool,
     plugin_items: &[crate::plugins::PluginMenuItem],
     context_menu_action: &mut Option<crate::ui::context_menu::ContextMenuAction>,
+    jump_to_char: &mut Option<usize>,
+    nav_flash_animation: Option<(usize, std::time::Instant)>,
 ) {
     debug_assert!(
         (8.0..=48.0).contains(&font_size),
@@ -1307,6 +1416,86 @@ fn render_multiline_editor_pane(
         .inner;
 
     let resp = &output.response;
+
+    // Handle pending jump from Outline navigator
+    if let Some(target_char) = jump_to_char.take() {
+        output.response.request_focus();
+        let target_clamped = target_char.min(note.content.len());
+        let ccursor = egui::text::CCursor::new(target_clamped);
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), output.response.id)
+            .unwrap_or_else(|| output.state.clone());
+        state
+            .cursor
+            .set_char_range(Some(egui::text_selection::CCursorRange::one(ccursor)));
+        state.store(ui.ctx(), output.response.id);
+        *last_cursor_range = Some((target_clamped, target_clamped));
+
+        let mut char_acc = 0;
+        let mut target_y = 0.0;
+        for row in &output.galley.rows {
+            let row_char_count = row.glyphs.len() + 1;
+            if char_acc + row_char_count >= target_clamped {
+                target_y = row.rect().min.y;
+                break;
+            }
+            char_acc += row_char_count;
+        }
+
+        let target_pos = egui::pos2(output.galley_pos.x, output.galley_pos.y + target_y);
+        ui.scroll_to_rect(
+            egui::Rect::from_min_size(target_pos, egui::vec2(10.0, font_size * 2.0)),
+            Some(egui::Align::Center),
+        );
+        ui.ctx().request_repaint();
+    }
+
+    // Draw animated focus glow if navigation flash is active in editor
+    if let Some((flash_target, start_time)) = nav_flash_animation {
+        let elapsed = start_time.elapsed().as_secs_f32();
+        if elapsed < 1.2 {
+            let progress = (elapsed / 1.2).clamp(0.0, 1.0);
+            let alpha = (1.0 - progress).powi(2);
+            let target_clamped = flash_target.min(note.content.len());
+            let mut char_acc = 0;
+            let mut target_row = None;
+            for row in &output.galley.rows {
+                let row_char_count = row.glyphs.len() + 1;
+                if char_acc + row_char_count >= target_clamped {
+                    target_row = Some(row.rect());
+                    break;
+                }
+                char_acc += row_char_count;
+            }
+
+            let r = target_row.unwrap_or_else(|| {
+                egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(output.response.rect.width(), font_size * 1.5),
+                )
+            });
+            let row_y = output.galley_pos.y + r.min.y;
+            let glow_rect = egui::Rect::from_min_max(
+                egui::pos2(output.response.rect.min.x + 2.0, row_y - 2.0),
+                egui::pos2(output.response.rect.max.x - 2.0, row_y + r.height() + 2.0),
+            );
+
+            ui.painter().rect_filled(
+                glow_rect,
+                CornerRadius::same(6),
+                Palette::with_alpha(palette.accent, (55.0 * alpha) as u8),
+            );
+            ui.painter().rect_stroke(
+                glow_rect,
+                CornerRadius::same(6),
+                Stroke::new(
+                    1.5,
+                    Palette::with_alpha(palette.accent, (190.0 * alpha) as u8),
+                ),
+                egui::StrokeKind::Outside,
+            );
+            ui.ctx().request_repaint();
+        }
+    }
 
     // Handle clicking or dragging anywhere on the line numbers gutter to focus editor and place cursor
     if let Some(ref g_resp) = gutter_resp

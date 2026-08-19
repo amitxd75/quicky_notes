@@ -26,6 +26,7 @@ pub enum ShortcutAction {
     OpenSettings,
     ExportNote,
     ToggleAlwaysOnTop,
+    ToggleOutline,
     IncreaseFontSize,
     DecreaseFontSize,
     AiAssist,
@@ -52,6 +53,7 @@ impl ShortcutAction {
         Self::OpenFile,
         Self::OpenFolder,
         Self::ToggleFolderSidebar,
+        Self::ToggleOutline,
         Self::AttachImage,
         Self::ToggleMarkdown,
         Self::AiAssist,
@@ -86,6 +88,7 @@ impl ShortcutAction {
             Self::ToggleFolderSidebar => "Toggle Folder Sidebar",
             Self::AttachImage => "Attach Image from Disk",
             Self::ToggleMarkdown => "Toggle Markdown Preview",
+            Self::ToggleOutline => "Toggle Document Outline",
             Self::AiAssist => "AI Copilot & Fixer",
             Self::SearchNotes => "Search & Browse Notes",
             Self::OpenSettings => "Open Settings & Preferences",
@@ -134,6 +137,7 @@ impl ShortcutAction {
 
             Self::ToggleMarkdown
             | Self::ToggleFolderSidebar
+            | Self::ToggleOutline
             | Self::AiAssist
             | Self::IncreaseFontSize
             | Self::DecreaseFontSize => "Editor & View",
@@ -151,6 +155,7 @@ impl ShortcutAction {
             Self::OpenFile => KeyBinding::ctrl("O"),
             Self::OpenFolder => KeyBinding::ctrl_shift("O"),
             Self::ToggleFolderSidebar => KeyBinding::ctrl("B"),
+            Self::ToggleOutline => KeyBinding::alt("O"),
             Self::AttachImage => KeyBinding::ctrl_shift("I"),
             Self::ToggleMarkdown => KeyBinding::ctrl("P"),
             Self::AiAssist => KeyBinding::ctrl("Enter"),
@@ -207,6 +212,16 @@ impl KeyBinding {
             ctrl: true,
             shift: true,
             alt: false,
+        }
+    }
+
+    /// Creates a key combination with Alt modifier.
+    pub fn alt(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            ctrl: false,
+            shift: false,
+            alt: true,
         }
     }
 
@@ -756,6 +771,8 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
     let trigger_open_folder = ctx.input(|i| kb.get(ShortcutAction::OpenFolder).matches_input(i));
     let trigger_toggle_folder_sidebar =
         ctx.input(|i| kb.get(ShortcutAction::ToggleFolderSidebar).matches_input(i));
+    let trigger_toggle_outline =
+        ctx.input(|i| kb.get(ShortcutAction::ToggleOutline).matches_input(i));
     let trigger_attach_image = ctx.input(|i| kb.get(ShortcutAction::AttachImage).matches_input(i));
     let trigger_markdown = ctx.input(|i| kb.get(ShortcutAction::ToggleMarkdown).matches_input(i));
 
@@ -852,6 +869,15 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
         ctx.request_repaint();
     }
 
+    if trigger_toggle_outline {
+        app.show_outline = !app.show_outline;
+        if app.show_outline {
+            app.show_options = false;
+            app.show_search = false;
+        }
+        ctx.request_repaint();
+    }
+
     if trigger_attach_image {
         app.show_options = false;
         app.show_search = false;
@@ -927,7 +953,7 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             &crate::storage::AppData::config_path(),
         );
         app.set_status(format!(
-            "Font size: {:.0}pt (saved)",
+            "Editor font size: {:.0}pt (saved)",
             app.data.settings.editor.font_size
         ));
         ctx.request_repaint();
@@ -943,7 +969,7 @@ pub fn handle_keyboard_shortcuts(app: &mut QuickyNotesApp, ctx: &egui::Context) 
             &crate::storage::AppData::config_path(),
         );
         app.set_status(format!(
-            "Font size: {:.0}pt (saved)",
+            "Editor font size: {:.0}pt (saved)",
             app.data.settings.editor.font_size
         ));
         ctx.request_repaint();

@@ -29,7 +29,8 @@ pub fn render_search_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &
                     .color(Color32::WHITE),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close_btn = button::close_button(ui, &palette);
+                let close_btn =
+                    button::close_button(ui, &palette).on_hover_text("Close search (Esc)");
                 if close_btn.clicked() {
                     app.show_search = false;
                     app.focus_editor = true;

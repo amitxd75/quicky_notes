@@ -56,11 +56,58 @@ impl SettingsTab {
             Self::About => ("ℹ", "About"),
         }
     }
+
+    /// Cycles forward to next tab.
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    /// Cycles backward to previous tab.
+    pub fn prev(self) -> Self {
+        let idx = Self::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        if idx == 0 {
+            Self::ALL[Self::ALL.len() - 1]
+        } else {
+            Self::ALL[idx - 1]
+        }
+    }
 }
+
+/// Width of the left navigation sidebar in the Settings drawer in pixels.
+pub const SETTINGS_SIDEBAR_WIDTH: f32 = 160.0;
+/// Height of the bottom status and footer bar in the Settings drawer in pixels.
+pub const SETTINGS_BOTTOM_BAR_HEIGHT: f32 = 42.0;
+/// Minimum content height for the Settings workspace in pixels.
+pub const SETTINGS_MIN_CONTENT_HEIGHT: f32 = 120.0;
+/// Height of each tab navigation button in the left sidebar in pixels.
+pub const SETTINGS_TAB_BUTTON_HEIGHT: f32 = 36.0;
 
 /// Renders the Settings & Preferences drawer shell with left sidebar and active tab content.
 pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui) {
+    const {
+        assert!(
+            SETTINGS_SIDEBAR_WIDTH > 50.0,
+            "Settings sidebar width must be sufficiently large for labels"
+        );
+    }
+
     let palette = app.active_palette();
+
+    // Handle keyboard arrow navigation between settings tabs when not focused in a text edit or recording a shortcut
+    let is_text_focused = ctx.memory(|m| m.focused().is_some());
+    if !is_text_focused && app.recording_shortcut.is_none() {
+        if ui.input(|i| i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowRight))
+        {
+            app.settings_tab = app.settings_tab.next();
+            ctx.request_repaint();
+        } else if ui
+            .input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowLeft))
+        {
+            app.settings_tab = app.settings_tab.prev();
+            ctx.request_repaint();
+        }
+    }
 
     ui.vertical(|ui| {
         ui.add_space(2.0);
@@ -75,7 +122,8 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close_btn = button::close_button(ui, &palette);
+                let close_btn =
+                    button::close_button(ui, &palette).on_hover_text("Close settings (Esc)");
                 if close_btn.clicked() {
                     app.show_options = false;
                     app.focus_editor = true;
@@ -89,9 +137,9 @@ pub fn render_options_drawer(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: 
         ui.add_space(6.0);
 
         // 2. Main Content (2-Panel: Left Navigation Sidebar + Full-Width Settings Workspace)
-        let bottom_bar_height = 42.0;
-        let total_height = (ui.available_height() - bottom_bar_height).max(120.0);
-        let sidebar_width = 160.0;
+        let total_height =
+            (ui.available_height() - SETTINGS_BOTTOM_BAR_HEIGHT).max(SETTINGS_MIN_CONTENT_HEIGHT);
+        let sidebar_width = SETTINGS_SIDEBAR_WIDTH;
 
         ui.horizontal(|ui| {
             // --- Column 1: Left Navigation Sidebar ---
@@ -184,7 +232,7 @@ fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
             let is_selected = app.settings_tab == tab;
             let (icon, label) = tab.icon_and_label();
 
-            let desired_size = egui::vec2(ui.available_width(), 36.0);
+            let desired_size = egui::vec2(ui.available_width(), SETTINGS_TAB_BUTTON_HEIGHT);
             let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
             let is_hovered = response.hovered();
@@ -421,4 +469,21 @@ fn render_bottom_bar(
             );
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_settings_tab_cycle_next_prev() {
+        let first = SettingsTab::General;
+        let second = first.next();
+        assert_eq!(second, SettingsTab::Appearance);
+
+        let last = SettingsTab::About;
+        assert_eq!(last.next(), SettingsTab::General);
+        assert_eq!(first.prev(), SettingsTab::About);
+        assert_eq!(second.prev(), SettingsTab::General);
+    }
 }

@@ -37,6 +37,24 @@ pub enum ContextMenuAction {
     PluginAction(String),
 }
 
+/// Minimum width of the context menu in pixels.
+pub const CONTEXT_MENU_MIN_WIDTH: f32 = 280.0;
+/// Maximum width of the context menu in pixels.
+pub const CONTEXT_MENU_MAX_WIDTH: f32 = 320.0;
+/// Maximum scrollable height of the context menu in pixels.
+pub const CONTEXT_MENU_MAX_HEIGHT: f32 = 600.0;
+/// Height of a single context menu row item in pixels.
+pub const CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0;
+
+/// Definition of an interactive context menu item.
+struct ContextMenuItemDef {
+    label: String,
+    shortcut: &'static str,
+    action: ContextMenuAction,
+    enabled: bool,
+    separator_after: bool,
+}
+
 /// Renders the floating right-click context menu and captures user action.
 pub fn render_editor_context_menu(
     ui: &mut Ui,
@@ -46,116 +64,212 @@ pub fn render_editor_context_menu(
     plugin_items: &[crate::plugins::PluginMenuItem],
     action_out: &mut Option<ContextMenuAction>,
 ) {
+    const {
+        assert!(
+            CONTEXT_MENU_MIN_WIDTH <= CONTEXT_MENU_MAX_WIDTH,
+            "Context menu min width must not exceed max width"
+        );
+    }
+
     let has_selection = cursor_range.is_some_and(|(start, end)| start < end);
 
-    ui.set_min_width(280.0);
-    ui.set_max_width(320.0);
+    ui.set_min_width(CONTEXT_MENU_MIN_WIDTH);
+    ui.set_max_width(CONTEXT_MENU_MAX_WIDTH);
     ui.spacing_mut().item_spacing.y = 3.0;
+
+    // Build structured context menu entries
+    let mut items = Vec::with_capacity(16);
+
+    // 1. AI Copilot
+    let ai_label = if has_selection {
+        "✨ AI Copilot (Selection)...".to_string()
+    } else {
+        "✨ AI Copilot & Fixer...".to_string()
+    };
+    items.push(ContextMenuItemDef {
+        label: ai_label,
+        shortcut: "Ctrl+Enter",
+        action: ContextMenuAction::LaunchAi,
+        enabled: true,
+        separator_after: true,
+    });
+
+    // 2. Clipboard Operations
+    items.push(ContextMenuItemDef {
+        label: "✂ Cut".to_string(),
+        shortcut: "Ctrl+X",
+        action: ContextMenuAction::Cut,
+        enabled: has_selection,
+        separator_after: false,
+    });
+    let copy_label = if has_selection {
+        "📋 Copy"
+    } else {
+        "📋 Copy All"
+    };
+    items.push(ContextMenuItemDef {
+        label: copy_label.to_string(),
+        shortcut: "Ctrl+C",
+        action: ContextMenuAction::Copy,
+        enabled: true,
+        separator_after: false,
+    });
+    items.push(ContextMenuItemDef {
+        label: "📥 Paste".to_string(),
+        shortcut: "Ctrl+V",
+        action: ContextMenuAction::Paste,
+        enabled: true,
+        separator_after: false,
+    });
+    items.push(ContextMenuItemDef {
+        label: "🖼 Add Image...".to_string(),
+        shortcut: "Ctrl+Shift+I",
+        action: ContextMenuAction::AttachImage,
+        enabled: true,
+        separator_after: false,
+    });
+    items.push(ContextMenuItemDef {
+        label: "🗑 Delete".to_string(),
+        shortcut: "Del",
+        action: ContextMenuAction::Delete,
+        enabled: has_selection,
+        separator_after: true,
+    });
+
+    // 3. File & Folder Operations
+    items.push(ContextMenuItemDef {
+        label: "📥 Open File...".to_string(),
+        shortcut: "Ctrl+O",
+        action: ContextMenuAction::OpenFile,
+        enabled: true,
+        separator_after: false,
+    });
+    items.push(ContextMenuItemDef {
+        label: "📁 Open Folder...".to_string(),
+        shortcut: "Ctrl+Shift+O",
+        action: ContextMenuAction::OpenFolder,
+        enabled: true,
+        separator_after: true,
+    });
+
+    // 4. Selection & Search Operations
+    items.push(ContextMenuItemDef {
+        label: "🔲 Select All".to_string(),
+        shortcut: "Ctrl+A",
+        action: ContextMenuAction::SelectAll,
+        enabled: !note.content.is_empty(),
+        separator_after: false,
+    });
+    items.push(ContextMenuItemDef {
+        label: "🔍 Search Notes".to_string(),
+        shortcut: "Ctrl+K",
+        action: ContextMenuAction::SearchNotes,
+        enabled: true,
+        separator_after: false,
+    });
+    let has_plugins = !plugin_items.is_empty();
+    items.push(ContextMenuItemDef {
+        label: "💾 Save to Disk".to_string(),
+        shortcut: "Ctrl+S",
+        action: ContextMenuAction::SaveNotes,
+        enabled: true,
+        separator_after: has_plugins,
+    });
+
+    // 5. Plugin Actions
+    for item in plugin_items {
+        let label = if let Some(ref icon) = item.icon {
+            format!("{} {}", icon, item.label)
+        } else {
+            format!("🔌 {}", item.label)
+        };
+        items.push(ContextMenuItemDef {
+            label,
+            shortcut: "",
+            action: ContextMenuAction::PluginAction(item.action_id.clone()),
+            enabled: true,
+            separator_after: false,
+        });
+    }
+
+    // Keyboard Arrow Navigation
+    let menu_sel_id = ui.id().with("ctx_menu_keyboard_sel");
+    let mut current_sel: Option<usize> = ui.ctx().data(|d| d.get_temp(menu_sel_id));
+    let enabled_indices: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item.enabled)
+        .map(|(i, _)| i)
+        .collect();
+
+    if !enabled_indices.is_empty() {
+        if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+            let next_pos =
+                match current_sel.and_then(|cs| enabled_indices.iter().position(|&ei| ei == cs)) {
+                    Some(pos) => (pos + 1) % enabled_indices.len(),
+                    None => 0,
+                };
+            let next_idx = enabled_indices[next_pos];
+            current_sel = Some(next_idx);
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(menu_sel_id, current_sel));
+            ui.ctx().request_repaint();
+        } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+            let prev_pos =
+                match current_sel.and_then(|cs| enabled_indices.iter().position(|&ei| ei == cs)) {
+                    Some(pos) => {
+                        if pos == 0 {
+                            enabled_indices.len() - 1
+                        } else {
+                            pos - 1
+                        }
+                    }
+                    None => enabled_indices.len() - 1,
+                };
+            let prev_idx = enabled_indices[prev_pos];
+            current_sel = Some(prev_idx);
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(menu_sel_id, current_sel));
+            ui.ctx().request_repaint();
+        }
+
+        if ui.input(|i| i.key_pressed(egui::Key::Enter))
+            && let Some(sel) = current_sel
+            && let Some(item) = items.get(sel)
+            && item.enabled
+        {
+            *action_out = Some(item.action.clone());
+            ui.close();
+        }
+    }
+
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ui.close();
+    }
 
     egui::ScrollArea::vertical()
         .id_salt("editor_context_menu_scroll")
-        .max_height(600.0)
+        .max_height(CONTEXT_MENU_MAX_HEIGHT)
         .auto_shrink([true, true])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                // ─── 1. AI Copilot ───
-                let ai_label = if has_selection {
-                    "✨ AI Copilot (Selection)..."
-                } else {
-                    "✨ AI Copilot & Fixer..."
-                };
-                if menu_item(ui, ai_label, "Ctrl+Enter", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::LaunchAi);
-                    ui.close();
-                }
-
-                menu_separator(ui, palette);
-
-                // ─── 2. Clipboard Operations ───
-                if menu_item(ui, "✂ Cut", "Ctrl+X", palette, has_selection).clicked() {
-                    *action_out = Some(ContextMenuAction::Cut);
-                    ui.close();
-                }
-
-                let copy_label = if has_selection {
-                    "📋 Copy"
-                } else {
-                    "📋 Copy All"
-                };
-                if menu_item(ui, copy_label, "Ctrl+C", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::Copy);
-                    ui.close();
-                }
-
-                if menu_item(ui, "📥 Paste", "Ctrl+V", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::Paste);
-                    ui.close();
-                }
-
-                if menu_item(ui, "🖼 Add Image...", "Ctrl+Shift+I", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::AttachImage);
-                    ui.close();
-                }
-
-                if menu_item(ui, "🗑 Delete", "Del", palette, has_selection).clicked() {
-                    *action_out = Some(ContextMenuAction::Delete);
-                    ui.close();
-                }
-
-                menu_separator(ui, palette);
-
-                // ─── 3. File & Folder Operations ───
-                if menu_item(ui, "📥 Open File...", "Ctrl+O", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::OpenFile);
-                    ui.close();
-                }
-
-                if menu_item(ui, "📁 Open Folder...", "Ctrl+Shift+O", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::OpenFolder);
-                    ui.close();
-                }
-
-                menu_separator(ui, palette);
-
-                // ─── 4. Selection & Search Operations ───
-                if menu_item(
-                    ui,
-                    "🔲 Select All",
-                    "Ctrl+A",
-                    palette,
-                    !note.content.is_empty(),
-                )
-                .clicked()
-                {
-                    *action_out = Some(ContextMenuAction::SelectAll);
-                    ui.close();
-                }
-
-                if menu_item(ui, "🔍 Search Notes", "Ctrl+K", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::SearchNotes);
-                    ui.close();
-                }
-
-                if menu_item(ui, "💾 Save to Disk", "Ctrl+S", palette, true).clicked() {
-                    *action_out = Some(ContextMenuAction::SaveNotes);
-                    ui.close();
-                }
-
-                // ─── 5. Plugin Actions (if any registered) ───
-                if !plugin_items.is_empty() {
-                    menu_separator(ui, palette);
-                    for item in plugin_items {
-                        let label = if let Some(ref icon) = item.icon {
-                            format!("{} {}", icon, item.label)
-                        } else {
-                            format!("🔌 {}", item.label)
-                        };
-                        if menu_item(ui, &label, "", palette, true).clicked() {
-                            *action_out =
-                                Some(ContextMenuAction::PluginAction(item.action_id.clone()));
-                            ui.close();
-                        }
+                for (idx, item) in items.into_iter().enumerate() {
+                    let is_sel = current_sel == Some(idx);
+                    let resp = menu_item(
+                        ui,
+                        &item.label,
+                        item.shortcut,
+                        palette,
+                        item.enabled,
+                        is_sel,
+                    );
+                    if resp.clicked() {
+                        *action_out = Some(item.action);
+                        ui.close();
+                    }
+                    if item.separator_after {
+                        menu_separator(ui, palette);
                     }
                 }
             });
@@ -169,31 +283,41 @@ fn menu_item(
     shortcut: &str,
     palette: &Palette,
     enabled: bool,
+    is_keyboard_selected: bool,
 ) -> Response {
-    let desired_width = ui.available_width().max(280.0);
-    let height = 30.0;
+    let desired_width = ui.available_width().max(CONTEXT_MENU_MIN_WIDTH);
+    let height = CONTEXT_MENU_ITEM_HEIGHT;
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(desired_width, height), Sense::click());
 
     if enabled {
         let hover = response.hovered();
-        let bg_color = if hover {
-            Palette::with_alpha(palette.accent, 75)
+        let is_highlighted = hover || is_keyboard_selected;
+        let bg_color = if is_highlighted {
+            Palette::with_alpha(palette.accent, if is_keyboard_selected { 90 } else { 75 })
         } else {
             Color32::TRANSPARENT
         };
 
-        if hover {
+        if is_highlighted {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(6), bg_color);
+            if is_keyboard_selected {
+                ui.painter().rect_stroke(
+                    rect,
+                    CornerRadius::same(6),
+                    Stroke::new(1.0, Palette::with_alpha(palette.accent, 180)),
+                    egui::StrokeKind::Inside,
+                );
+            }
         }
 
-        let text_color = if hover {
+        let text_color = if is_highlighted {
             Color32::WHITE
         } else {
             Color32::from_gray(245)
         };
-        let shortcut_color = if hover {
+        let shortcut_color = if is_highlighted {
             Color32::from_gray(225)
         } else {
             Color32::from_gray(140)
