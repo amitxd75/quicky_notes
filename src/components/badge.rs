@@ -35,7 +35,7 @@ pub fn shortcut_badge(ui: &mut Ui, label: &str, palette: &Palette) -> egui::Resp
         rect,
         CornerRadius::same(4),
         Stroke::new(1.0, Palette::with_alpha(palette.border, 90)),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
     ui.painter().text(
         rect.center(),
@@ -63,7 +63,7 @@ pub fn custom_color_badge(ui: &mut Ui, label: &str, accent: Color32) -> egui::Re
         rect,
         CornerRadius::same(4),
         Stroke::new(1.0, Palette::with_alpha(accent, 150)),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
     ui.painter().text(
         rect.center(),

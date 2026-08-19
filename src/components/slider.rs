@@ -38,7 +38,7 @@ pub fn glass_slider(
         track_rect,
         CornerRadius::same(4),
         Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(100, 70, 140, 100)),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     // Filled track
@@ -104,6 +104,7 @@ pub fn slider_row(
                 .color(Color32::from_gray(230)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(2.0);
             ui.label(
                 RichText::new(value_display)
                     .font(FontId::monospace(12.0))

@@ -3,7 +3,7 @@
 use crate::theme::Palette;
 use eframe::egui::{self, Color32, CornerRadius, FontId, RichText, Sense, Stroke, Ui};
 
-/// Renders a selectable glass pill button with smooth animated transitions and checkmark if selected.
+/// Renders a selectable glass pill button with smooth animated transitions, checkmark, and stable responsive dimensions.
 pub fn selection_pill(
     ui: &mut Ui,
     label: &str,
@@ -15,20 +15,20 @@ pub fn selection_pill(
         .ctx()
         .animate_bool_responsive(pill_id.with("sel"), is_selected);
 
-    let display_text = if is_selected {
-        format!("{}  ✓", label)
-    } else {
-        label.to_string()
-    };
-
     let font_size = 11.5_f32;
-    let galley = ui.painter().layout_no_wrap(
-        display_text.clone(),
-        FontId::proportional(font_size),
-        Color32::WHITE,
-    );
-    let text_size = galley.size();
-    let min_size = egui::vec2((text_size.x + 20.0).max(44.0), 28.0);
+    let label_font = FontId::proportional(font_size);
+    let label_galley =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), label_font.clone(), Color32::WHITE);
+    let check_galley =
+        ui.painter()
+            .layout_no_wrap("✓".to_string(), label_font.clone(), Color32::WHITE);
+
+    // Compute stable, responsive width that does NOT jump or resize when selected/enabled
+    let label_w = label_galley.size().x;
+    let check_w = check_galley.size().x;
+    let icon_gap = 5.0_f32;
+    let min_size = egui::vec2((label_w + check_w + icon_gap + 20.0).max(46.0), 28.0);
     let (mut rect, response) = ui.allocate_exact_size(min_size, Sense::click());
 
     let is_hovered = response.hovered();
@@ -72,7 +72,7 @@ pub fn selection_pill(
         rect,
         CornerRadius::same(6),
         Stroke::new(1.0 + 0.2 * sel_anim, border_color),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let text_color = if sel_anim > 0.01 {
@@ -84,15 +84,38 @@ pub fn selection_pill(
     };
 
     let y_lift = if sel_anim < 0.5 { -hov_anim * 0.5 } else { 0.0 };
-    let center = egui::pos2(rect.center().x, rect.center().y + y_lift);
+
+    // When sel_anim = 0, label is centered at rect.center().x.
+    // When sel_anim > 0, label smoothly glides left to make room for checkmark ✓ on right.
+    let unselected_center_x = rect.center().x;
+    let selected_label_center_x = rect.center().x - (check_w + icon_gap) * 0.5;
+    let label_center_x = egui::lerp(unselected_center_x..=selected_label_center_x, sel_anim);
+    let check_center_x = label_center_x + label_w * 0.5 + icon_gap + check_w * 0.5;
 
     ui.painter().text(
-        center,
+        egui::pos2(label_center_x, rect.center().y + y_lift),
         egui::Align2::CENTER_CENTER,
-        &display_text,
-        FontId::proportional(font_size),
+        label,
+        label_font.clone(),
         text_color,
     );
+
+    if sel_anim > 0.01 {
+        let check_alpha = (255.0 * sel_anim).clamp(0.0, 255.0) as u8;
+        let check_color = Color32::from_rgba_unmultiplied(
+            palette.accent.r(),
+            palette.accent.g(),
+            palette.accent.b(),
+            check_alpha,
+        );
+        ui.painter().text(
+            egui::pos2(check_center_x, rect.center().y + y_lift),
+            egui::Align2::CENTER_CENTER,
+            "✓",
+            label_font,
+            check_color,
+        );
+    }
 
     response
 }
@@ -112,6 +135,7 @@ pub fn glass_chip_button(ui: &mut Ui, label: &str, palette: &Palette) -> egui::R
 }
 
 /// Renders a labeled row with a title on the left and a right-aligned group of selection pills.
+/// Automatically and responsively wraps to a multi-line layout if the available width is constrained.
 pub fn selection_row<'a, T: PartialEq + Clone>(
     ui: &mut Ui,
     label: &str,
@@ -120,14 +144,63 @@ pub fn selection_row<'a, T: PartialEq + Clone>(
     palette: &Palette,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(label)
-                .font(FontId::proportional(12.5))
-                .color(Color32::from_gray(230)),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            for (opt_label, val) in options {
+    let opts: Vec<(&'a str, T)> = options.into_iter().collect();
+    let font_size = 11.5_f32;
+    let label_font = FontId::proportional(font_size);
+    let check_w = ui
+        .painter()
+        .layout_no_wrap("✓".to_string(), label_font.clone(), Color32::WHITE)
+        .size()
+        .x;
+    let icon_gap = 5.0_f32;
+    let item_spacing_x = 6.0_f32;
+
+    // Calculate total width needed by all pills combined in their stable size
+    let mut total_pills_w = 0.0_f32;
+    for (i, (opt_label, _)) in opts.iter().enumerate() {
+        let label_w = ui
+            .painter()
+            .layout_no_wrap(opt_label.to_string(), label_font.clone(), Color32::WHITE)
+            .size()
+            .x;
+        let pill_w = (label_w + check_w + icon_gap + 20.0).max(46.0);
+        total_pills_w += pill_w;
+        if i > 0 {
+            total_pills_w += item_spacing_x;
+        }
+    }
+
+    let title_w = ui
+        .painter()
+        .layout_no_wrap(
+            label.to_string(),
+            FontId::proportional(12.5),
+            Color32::WHITE,
+        )
+        .size()
+        .x;
+
+    let avail_w = ui.available_width();
+    let right_pad = 2.0_f32;
+    let fits_single_row = (title_w + 16.0 + total_pills_w + right_pad) <= avail_w;
+
+    if fits_single_row {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = item_spacing_x;
+            ui.label(
+                RichText::new(label)
+                    .font(FontId::proportional(12.5))
+                    .color(Color32::from_gray(230)),
+            );
+
+            // Align pills cleanly to the right in natural left-to-right order
+            let remaining_w = ui.available_width();
+            let left_gap = (remaining_w - total_pills_w - right_pad).max(0.0);
+            if left_gap > 0.0 {
+                ui.add_space(left_gap);
+            }
+
+            for (opt_label, val) in opts {
                 let is_active = *current_value == val;
                 if selection_pill(ui, opt_label, is_active, palette).clicked() {
                     *current_value = val;
@@ -135,7 +208,28 @@ pub fn selection_row<'a, T: PartialEq + Clone>(
                 }
             }
         });
-    });
+    } else {
+        // Multi-line responsive stack for narrow widths or cards with many choices
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.label(
+                RichText::new(label)
+                    .font(FontId::proportional(12.5))
+                    .color(Color32::from_gray(230)),
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(item_spacing_x, 6.0);
+                for (opt_label, val) in opts {
+                    let is_active = *current_value == val;
+                    if selection_pill(ui, opt_label, is_active, palette).clicked() {
+                        *current_value = val;
+                        changed = true;
+                    }
+                }
+            });
+        });
+    }
+
     changed
 }
 
@@ -174,7 +268,7 @@ pub fn animated_action_button(
         rect,
         CornerRadius::same(8),
         Stroke::new(1.0 + 0.2 * hov_anim, border_color),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let text_color = Palette::interpolate_color(Color32::from_gray(215), Color32::WHITE, hov_anim);
@@ -227,7 +321,7 @@ pub fn animated_primary_button(
         rect,
         CornerRadius::same(8),
         Stroke::new(1.0 + 0.3 * hov_anim, border_color),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let y_lift = -hov_anim * 0.75;
@@ -274,7 +368,7 @@ pub fn animated_danger_button(ui: &mut Ui, label: &str, min_size: egui::Vec2) ->
         rect,
         CornerRadius::same(8),
         Stroke::new(1.0 + 0.3 * hov_anim, border_color),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let y_lift = -hov_anim * 0.75;
@@ -331,7 +425,7 @@ pub fn animated_shortcut_badge(
             rect,
             CornerRadius::same(8),
             Stroke::new(1.4, Color32::WHITE),
-            egui::StrokeKind::Outside,
+            egui::StrokeKind::Inside,
         );
         ui.painter().text(
             rect.center(),
@@ -358,7 +452,7 @@ pub fn animated_shortcut_badge(
             rect,
             CornerRadius::same(8),
             Stroke::new(1.0 + 0.3 * hov_anim, border_color),
-            egui::StrokeKind::Outside,
+            egui::StrokeKind::Inside,
         );
 
         let text_color = if is_modified {
@@ -412,7 +506,7 @@ pub fn animated_revert_button(ui: &mut Ui, palette: &Palette) -> egui::Response 
         rect,
         CornerRadius::same(6),
         Stroke::new(1.0 + 0.2 * hov_anim, border_color),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let icon_color = Palette::interpolate_color(Color32::from_gray(180), Color32::WHITE, hov_anim);
@@ -615,7 +709,7 @@ pub fn icon_button(
             rect,
             CornerRadius::same(8),
             stroke,
-            egui::StrokeKind::Outside,
+            egui::StrokeKind::Inside,
         );
     }
 

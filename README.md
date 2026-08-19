@@ -5,12 +5,11 @@ Lightweight floating glassmorphism note widget and fast code scratchpad for Hypr
 ![Quicky Notes](./assets/screenshot-main.png)
 ## Core Highlights
 
-- **Adaptive Glassmorphism & Wallpaper Sync**: Real-time palette extraction from your wallpaper using Pywal and Caelestia, plus AI-driven theme generation.
-- **Embedded Predictive Autocomplete**: Zero-latency ghost text powered by a dual-engine Radix Trie and Markov bigram model.
-- **Multi-Provider AI Copilot**: Native support for Gemini, OpenAI, Claude, DeepSeek, Groq, Ollama, and OpenRouter for refactoring and summaries.
-- **Portable `.qn` Containers & Direct Disk Linking**: Binary note format with image embedding, plus live filesystem editing with automatic mtime detection.
-- **Syntax Highlighting & Soft-Wrap Aware Gutter**: Highlighting for 15+ languages with stable, pixel-locked line numbering.
-- **Embedded Rhai Scripting**: A lightweight Rust scripting engine for custom buttons, hotkeys, and hot-reloadable community plugins.
+- Wallpaper color sync (Pywal & Caelestia) and adaptive glassmorphism
+- Predictive autocomplete with local dual-engine ghost text
+- Multi-provider AI Copilot (Gemini, Claude, OpenAI, Ollama, etc.)
+- Portable `.qn` containers with embedded images and live disk sync
+- Extensible Rhai scripting engine for plugins and custom actions
 
 ![Settings](./assets/screenshot-settings.png)
 ![Plugin Manager](./assets/screenshot-plugin.png)

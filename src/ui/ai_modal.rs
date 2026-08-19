@@ -283,7 +283,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                 badge_rect,
                                 CornerRadius::same(8),
                                 Stroke::new(1.0, Palette::with_alpha(palette.accent, 110)),
-                                egui::StrokeKind::Outside,
+                                egui::StrokeKind::Inside,
                             );
                             ui.painter().text(
                                 badge_rect.center(),
@@ -701,7 +701,7 @@ fn render_action_tile(ui: &mut Ui, label: &str, palette: &Palette) -> egui::Resp
         rect,
         CornerRadius::same(5),
         Stroke::new(1.0 + 0.5 * hov_anim, border_color),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let text_color = if is_hovered {

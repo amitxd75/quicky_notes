@@ -249,7 +249,7 @@ fn render_navigation_sidebar(app: &mut QuickyNotesApp, ui: &mut Ui, palette: &th
                 draw_rect,
                 CornerRadius::same(8),
                 stroke,
-                egui::StrokeKind::Outside,
+                egui::StrokeKind::Inside,
             );
 
             // Centered icon in dedicated 28px left area with smooth hover micro-scale and lift
@@ -338,7 +338,7 @@ fn render_bottom_bar(
             draw_rect,
             CornerRadius::same(6),
             Stroke::new(1.0 + 0.2 * hov_anim, stroke_color),
-            egui::StrokeKind::Outside,
+            egui::StrokeKind::Inside,
         );
 
         let y_lift = -hov_anim * 0.5;
@@ -381,7 +381,7 @@ fn render_bottom_bar(
                     90,
                 ),
             ),
-            egui::StrokeKind::Outside,
+            egui::StrokeKind::Inside,
         );
         ui.painter().text(
             esc_rect.center(),

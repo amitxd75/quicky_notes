@@ -78,14 +78,6 @@ pub fn render_backup_info_card(
         {
             crate::ui::drag_drop::safe_open_folder(parent);
         }
-
-        ui.add_space(4.0);
-
-        ui.label(
-            RichText::new("✓ SQLite ACID transactional persistence for all notes\n✓ Encrypted / machine-salted API key storage\n✓ Atomic config.json writes with corruption recovery")
-                .font(FontId::proportional(11.5))
-                .color(Color32::from_gray(180)),
-        );
     });
 }
 

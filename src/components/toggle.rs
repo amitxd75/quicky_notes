@@ -22,7 +22,7 @@ pub fn toggle_switch(ui: &mut Ui, on: &mut bool, accent: Color32) -> egui::Respo
         rect,
         CornerRadius::same(10),
         Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(100, 60, 140, 120)),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
 
     let circle_x = egui::lerp((rect.left() + 10.0)..=(rect.right() - 10.0), how_on);
@@ -41,6 +41,7 @@ pub fn toggle_row(ui: &mut Ui, label: &str, on: &mut bool, accent: Color32) -> e
                 .color(Color32::from_gray(230)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(2.0);
             toggle_switch(ui, on, accent)
         })
         .inner

@@ -24,11 +24,11 @@ pub const WINDOW_CTRL_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 pub const OPTIONS_BTN_SIZE: egui::Vec2 = egui::vec2(28.0, 28.0);
 
 /// Base width reserved for right-side action controls (Close, Settings, Search, File/Folder buttons, dividers).
-pub const RIGHT_CONTROLS_BASE_WIDTH: f32 = 160.0;
+pub const RIGHT_CONTROLS_BASE_WIDTH: f32 = 236.0;
 /// Additional width reserved when a folder workspace is open (sidebar toggle button).
-pub const RIGHT_CONTROLS_FOLDER_WIDTH: f32 = 32.0;
+pub const RIGHT_CONTROLS_FOLDER_WIDTH: f32 = 36.0;
 /// Additional width reserved when active note is Markdown (preview mode button).
-pub const RIGHT_CONTROLS_MARKDOWN_WIDTH: f32 = 32.0;
+pub const RIGHT_CONTROLS_MARKDOWN_WIDTH: f32 = 36.0;
 /// Minimum safety width for the tab scroll area to prevent underflow.
 pub const MIN_TABS_SCROLL_WIDTH: f32 = 40.0;
 
@@ -39,7 +39,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
     // Solid outer header container bar
     card::glass_header_frame(&app.data.settings).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().item_spacing.x = 8.0;
 
             // 1. Calculate exact width needed for all right-hand action button groups
             let has_folder = app.folder_workspace.is_some();
@@ -53,7 +53,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
             } else {
                 0
             };
-            let plugin_btn_width = plugin_btn_count as f32 * (HEADER_BTN_SIZE.x + 4.0);
+            let plugin_btn_width = plugin_btn_count as f32 * (HEADER_BTN_SIZE.x + 6.5);
 
             let right_buttons_width = RIGHT_CONTROLS_BASE_WIDTH
                 + (if has_folder {
@@ -69,7 +69,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                 + plugin_btn_width;
 
             let available_tab_width =
-                (ui.available_width() - right_buttons_width - 8.0).max(MIN_TABS_SCROLL_WIDTH);
+                (ui.available_width() - right_buttons_width - 10.0).max(MIN_TABS_SCROLL_WIDTH);
 
             // 2. Note tabs on the LEFT with hidden scrollbar for pixel-perfect vertical alignment
             egui::ScrollArea::horizontal()
@@ -86,7 +86,7 @@ pub fn render_header(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
 
             // 3. Right side: All action buttons, modal toggles, and window controls placed right-to-left
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().item_spacing.x = 6.5;
                 render_right_controls(app, ctx, ui, &palette);
             });
         });
@@ -415,7 +415,7 @@ fn render_right_controls(
             md_active,
             palette,
             14.0,
-            egui::vec2(32.0, 30.0),
+            HEADER_BTN_SIZE,
         );
         let md_shortcut = app.shortcut_label(crate::ui::shortcuts::ShortcutAction::ToggleMarkdown);
         if md_btn

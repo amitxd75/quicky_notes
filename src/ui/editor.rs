@@ -1161,7 +1161,7 @@ pub fn render_drop_hover_overlay(ctx: &egui::Context) {
         rect.shrink(8.0),
         CornerRadius::same(10),
         Stroke::new(2.0_f32, ACCENT_PURPLE),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
     painter.text(
         rect.center(),
