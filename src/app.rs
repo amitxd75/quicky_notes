@@ -116,6 +116,10 @@ pub struct QuickyNotesApp {
     /// Last recorded cursor selection character range `(start_idx, end_idx)`.
     pub last_cursor_range: Option<(usize, usize)>,
 
+    /// Last active non-empty text selection range `(start_idx, end_idx)` where `start < end`.
+    /// Preserved across touch and trackpad gesture disambiguation frames to eliminate flicker on RMB.
+    pub last_selected_range: Option<(usize, usize)>,
+
     /// Split preview ratio (0.15 to 0.85) defining the width of the editor vs preview pane.
     pub split_ratio: f32,
 
@@ -234,6 +238,7 @@ impl QuickyNotesApp {
             suggestion_rx: Some(suggest_rx),
             active_ghost_suffix: None,
             last_cursor_range: None,
+            last_selected_range: None,
             split_ratio: 0.5,
             last_window_size_check: Instant::now(),
             folder_workspace: None,
@@ -650,6 +655,65 @@ impl QuickyNotesApp {
             }
         }
 
+        // If auto_title_from_first_line is enabled, derive title on save for unnamed notes, preserving proper .qn extension
+        if self.data.settings.general.auto_title_from_first_line {
+            let prefix = self
+                .data
+                .settings
+                .general
+                .default_title_prefix
+                .to_lowercase();
+            let default_ext = if self.data.settings.editor.default_extension.starts_with('.') {
+                &self.data.settings.editor.default_extension
+            } else {
+                ".qn"
+            };
+
+            for note in &mut self.data.notes {
+                if note.file_path.is_none() {
+                    let title_lower = note.title.to_lowercase();
+                    let is_default_title = title_lower.starts_with(&prefix)
+                        || title_lower.starts_with("untitled")
+                        || title_lower.starts_with("note_");
+
+                    if is_default_title
+                        && let Some(first_line) =
+                            note.content.lines().find(|l| !l.trim().is_empty())
+                    {
+                        let clean_line = first_line.trim().trim_start_matches('#').trim();
+                        let alphabetic_count =
+                            clean_line.chars().filter(|c| c.is_alphabetic()).count();
+
+                        if alphabetic_count >= 3 && clean_line.len() >= 3 {
+                            let ext = if note.title.contains('.') {
+                                format!(".{}", note.title.rsplit('.').next().unwrap_or("qn"))
+                            } else {
+                                default_ext.to_string()
+                            };
+
+                            let max_title_chars = self
+                                .data
+                                .settings
+                                .advanced
+                                .max_note_title_len
+                                .saturating_sub(ext.len() + 2)
+                                .max(12);
+
+                            let mut truncated: String =
+                                clean_line.chars().take(max_title_chars).collect();
+                            if !truncated.ends_with(&ext) {
+                                truncated.push_str(&ext);
+                            }
+                            note.title = crate::models::Note::sanitize_title_with_len(
+                                &truncated,
+                                self.data.settings.advanced.max_note_title_len,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Sync any externally linked notes directly to their target files on disk
         let sync_res = crate::storage::sync_linked_notes_to_disk(&mut self.data.notes);
         let (linked_count, sync_errors) = match sync_res {
@@ -912,6 +976,7 @@ mod tests {
             suggestion_rx: None,
             active_ghost_suffix: None,
             last_cursor_range: None,
+            last_selected_range: None,
             split_ratio: 0.5,
             last_window_size_check: Instant::now(),
             folder_workspace: None,

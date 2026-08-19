@@ -352,8 +352,63 @@ async fn execute_ai_chat(req: AiRequest) -> Result<String, String> {
     if text.is_empty() {
         Err("AI returned an empty response".to_string())
     } else {
-        Ok(text)
+        let cleaned = clean_ai_output(&text, &req.action);
+        Ok(cleaned)
     }
+}
+
+/// Cleans raw AI response text, stripping accidental outer markdown code fences
+/// (e.g. ```` ```rust ... ``` ```` or trailing ```` ``` ````) that LLMs frequently wrap around direct code/text replacements.
+pub fn clean_ai_output(raw: &str, action: &AiAction) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let is_summary_or_explain = matches!(action, AiAction::Summarize | AiAction::Explain);
+
+    // 1. Check if the response is completely wrapped in an outermost code fence
+    if trimmed.starts_with("```")
+        && let Some(first_newline_idx) = trimmed.find('\n')
+    {
+        let first_line = &trimmed[..first_newline_idx];
+        let after_first_line = &trimmed[first_newline_idx + 1..];
+
+        if let Some(last_fence_idx) = after_first_line.rfind("```") {
+            let after_fence = after_first_line[last_fence_idx + 3..].trim();
+            // If there's no content after the closing fence
+            if after_fence.is_empty() {
+                let inner = after_first_line[..last_fence_idx]
+                    .trim_end_matches('\r')
+                    .trim_end_matches('\n');
+                let fence_header = first_line.trim();
+
+                // Ensure the first line is a pure fence header (e.g. ```, ```rust, ```python)
+                if fence_header.starts_with("```")
+                    && !fence_header[3..].contains(' ')
+                    && (!is_summary_or_explain
+                        || fence_header == "```"
+                        || fence_header.eq_ignore_ascii_case("```markdown")
+                        || fence_header.eq_ignore_ascii_case("```md")
+                        || fence_header.eq_ignore_ascii_case("```text"))
+                {
+                    return inner.to_string();
+                }
+            }
+        }
+    }
+
+    // 2. Guard against accidental lone trailing backtick fence at the end of the response
+    if !is_summary_or_explain
+        && trimmed.ends_with("```")
+        && !trimmed.starts_with("```")
+        && trimmed.matches("```").count() % 2 == 1
+        && let Some(idx) = trimmed.rfind("```")
+    {
+        return trimmed[..idx].trim_end().to_string();
+    }
+
+    trimmed.to_string()
 }
 
 /// Generated color theme and glass styling payload from AI.

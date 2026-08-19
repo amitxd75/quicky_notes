@@ -214,10 +214,10 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
 
     // 1. Translucent backdrop dimmer rendered via layer painter
     let screen_rect = ctx.content_rect();
-    let modal_width = (screen_rect.width() - 32.0).clamp(280.0, 720.0);
+    let modal_width = (screen_rect.width() - 48.0).clamp(300.0, 460.0);
     let modal_pos = egui::pos2(
         (screen_rect.center().x - modal_width / 2.0).max(screen_rect.min.x + 16.0),
-        (screen_rect.min.y + 30.0).max(screen_rect.center().y - 200.0),
+        (screen_rect.min.y + 36.0).max(screen_rect.center().y - 180.0),
     );
 
     ctx.layer_painter(egui::LayerId::new(
@@ -230,7 +230,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
         Color32::from_rgba_unmultiplied(0, 0, 0, 50),
     );
 
-    let mut modal_rect = egui::Rect::from_min_size(modal_pos, egui::vec2(modal_width, 240.0));
+    let mut modal_rect = egui::Rect::from_min_size(modal_pos, egui::vec2(modal_width, 180.0));
 
     // 2. Centered Glass Modal Dialog Card
     egui::Area::new(egui::Id::new("ai_copilot_modal_card"))
@@ -243,25 +243,25 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                     palette.card.r(),
                     palette.card.g(),
                     palette.card.b(),
-                    250,
+                    252,
                 ))
-                .stroke(Stroke::new(1.5, palette.accent))
-                .corner_radius(CornerRadius::same(14))
-                .inner_margin(Margin::symmetric(16, 14))
+                .stroke(Stroke::new(1.2, palette.accent))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::symmetric(14, 12))
                 .shadow(egui::Shadow {
-                    offset: [0, 8],
-                    blur: 24,
-                    spread: 2,
+                    offset: [0, 6],
+                    blur: 20,
+                    spread: 1,
                     color: Color32::from_black_alpha(80),
                 })
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         // 1. Header with model badge & compact ✕ close button
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 8.0;
+                            ui.spacing_mut().item_spacing.x = 6.0;
                             ui.label(
-                                RichText::new("AI Copilot")
-                                    .font(FontId::proportional(15.0))
+                                RichText::new("✨ AI Copilot")
+                                    .font(FontId::proportional(14.0))
                                     .strong()
                                     .color(Color32::WHITE),
                             );
@@ -272,24 +272,24 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                 &app.data.settings.ai.model
                             };
 
-                            let badge_bg = Palette::with_alpha(palette.accent, 40);
+                            let badge_bg = Palette::with_alpha(palette.accent, 35);
                             let (badge_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(active_model.len() as f32 * 7.2 + 14.0, 20.0),
+                                egui::vec2(active_model.len() as f32 * 6.5 + 12.0, 18.0),
                                 Sense::hover(),
                             );
                             ui.painter()
-                                .rect_filled(badge_rect, CornerRadius::same(10), badge_bg);
+                                .rect_filled(badge_rect, CornerRadius::same(8), badge_bg);
                             ui.painter().rect_stroke(
                                 badge_rect,
-                                CornerRadius::same(10),
-                                Stroke::new(1.0, Palette::with_alpha(palette.accent, 120)),
+                                CornerRadius::same(8),
+                                Stroke::new(1.0, Palette::with_alpha(palette.accent, 110)),
                                 egui::StrokeKind::Outside,
                             );
                             ui.painter().text(
                                 badge_rect.center(),
                                 egui::Align2::CENTER_CENTER,
                                 active_model,
-                                FontId::monospace(10.5),
+                                FontId::monospace(10.0),
                                 palette.accent,
                             );
 
@@ -301,8 +301,8 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                         "×",
                                         false,
                                         &palette,
-                                        13.0,
-                                        egui::vec2(26.0, 26.0),
+                                        12.0,
+                                        egui::vec2(22.0, 22.0),
                                     );
                                     if close_btn.on_hover_text("Close (Esc)").clicked() {
                                         discard_triggered = true;
@@ -311,60 +311,68 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                             );
                         });
 
-                        ui.add_space(6.0);
+                        ui.add_space(5.0);
 
-                        // 2. Selection Context Indicator Card
+                        // 2. Compact Selection Context Chip
                         if !app.ai_modal.target_text.is_empty() {
                             let char_count = app.ai_modal.target_text.chars().count();
                             let preview_snippet: String = app
                                 .ai_modal
                                 .target_text
                                 .chars()
-                                .take(60)
+                                .take(38)
                                 .collect::<String>()
                                 .replace('\n', " ");
-                            let preview_display = if char_count > 60 {
+                            let preview_display = if char_count > 38 {
                                 format!("{}...", preview_snippet)
                             } else {
                                 preview_snippet
                             };
 
-                            card::settings_card(ui, "TARGET SELECTION", &palette, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format!("📝 \"{}\"", preview_display))
-                                            .font(FontId::monospace(11.5))
-                                            .color(Color32::from_gray(230)),
-                                    );
+                            egui::Frame::NONE
+                                .fill(Palette::with_alpha(palette.accent, 22))
+                                .stroke(Stroke::new(1.0, Palette::with_alpha(palette.accent, 75)))
+                                .corner_radius(CornerRadius::same(6))
+                                .inner_margin(Margin::symmetric(8, 4))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui.label(
+                                            RichText::new("❝")
+                                                .font(FontId::proportional(11.0))
+                                                .color(palette.accent),
+                                        );
+                                        ui.label(
+                                            RichText::new(preview_display)
+                                                .font(FontId::monospace(11.0))
+                                                .color(Color32::from_gray(230)),
+                                        );
 
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new(format!("({} chars)", char_count))
-                                                    .font(FontId::proportional(10.5))
-                                                    .color(Color32::from_gray(140)),
-                                            );
-                                        },
-                                    );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new(format!("({}c)", char_count))
+                                                        .font(FontId::proportional(10.0))
+                                                        .color(Color32::from_gray(140)),
+                                                );
+                                            },
+                                        );
+                                    });
                                 });
-                            });
                         } else {
                             ui.label(
-                                RichText::new(
-                                    "📍 Note / Cursor Mode: AI will generate content from cursor context",
-                                )
-                                .font(FontId::proportional(11.0))
-                                .color(Color32::from_gray(175)),
+                                RichText::new("✦ Cursor context mode")
+                                    .font(FontId::proportional(10.5))
+                                    .color(Color32::from_gray(140)),
                             );
                         }
 
-
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
 
                         // 3. Quick Action Preset Tiles
                         ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
 
                             if render_action_tile(ui, "Fix & Polish", &palette).clicked() {
                                 action_to_trigger = Some(AiAction::FixAndPolish);
@@ -383,23 +391,20 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                             }
                         });
 
-                        ui.add_space(10.0);
+                        ui.add_space(6.0);
 
                         // 4. Custom Prompt Input Row (Fluid width)
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.spacing_mut().item_spacing.x = 5.0;
 
-                            let btn_width = 72.0;
-                            let prompt_width = (ui.available_width() - btn_width - 6.0).max(100.0);
-                            let prompt_edit = egui::TextEdit::singleline(
-                                &mut app.ai_modal.custom_prompt,
-                            )
-                            .hint_text(
-                                "Ask AI anything (e.g. 'Convert to Python', 'Make concise')...",
-                            )
-                            .font(FontId::proportional(12.5))
-                            .desired_width(prompt_width)
-                            .margin(Margin::symmetric(10, 8));
+                            let btn_width = 64.0;
+                            let prompt_width = (ui.available_width() - btn_width - 5.0).max(80.0);
+                            let prompt_edit =
+                                egui::TextEdit::singleline(&mut app.ai_modal.custom_prompt)
+                                    .hint_text("Ask AI anything (e.g. 'Translate', 'Refactor')...")
+                                    .font(FontId::proportional(11.5))
+                                    .desired_width(prompt_width)
+                                    .margin(Margin::symmetric(8, 5));
 
                             let resp = ui.add(prompt_edit);
                             if app.ai_modal.focus_input {
@@ -426,7 +431,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                 ui,
                                 "Run ↵",
                                 &palette,
-                                egui::vec2(btn_width, 32.0),
+                                egui::vec2(btn_width, 28.0),
                             );
                             if run_btn.clicked() && can_run {
                                 if !app.ai_modal.custom_prompt.trim().is_empty() {
@@ -474,7 +479,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
 
                             // Scrollable diff / preview box with responsive height and width
                             let max_preview_height =
-                                (screen_rect.height() * 0.45).clamp(100.0, 320.0);
+                                (screen_rect.height() * 0.35).clamp(80.0, 240.0);
                             egui::ScrollArea::vertical()
                                 .id_salt("ai_preview_scroll")
                                 .max_height(max_preview_height)
@@ -485,7 +490,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                         .fill(Color32::from_rgba_unmultiplied(20, 15, 30, 220))
                                         .stroke(Stroke::new(1.0, palette.border))
                                         .corner_radius(CornerRadius::same(6))
-                                        .inner_margin(Margin::same(10));
+                                        .inner_margin(Margin::same(8));
 
                                     preview_frame.show(ui, |ui| {
                                         ui.set_width(ui.available_width());
@@ -508,19 +513,28 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                             crate::ui::markdown::render_markdown(
                                                 ui,
                                                 preview,
-                                                app.data.settings.editor.font_size.clamp(11.0, 15.0),
+                                                app.data
+                                                    .settings
+                                                    .editor
+                                                    .font_size
+                                                    .clamp(11.0, 14.0),
                                                 app.data.settings.editor.monospace_font,
                                                 &palette,
                                                 None,
                                             );
                                         } else if !active_lang.is_empty() {
-                                            let code_font_size =
-                                                app.data.settings.editor.font_size.clamp(11.0, 15.0);
+                                            let code_font_size = app
+                                                .data
+                                                .settings
+                                                .editor
+                                                .font_size
+                                                .clamp(11.0, 14.0);
                                             let code_theme =
                                                 egui_extras::syntax_highlighting::CodeTheme::dark(
                                                     code_font_size,
                                                 );
-                                            let font_id = if app.data.settings.editor.monospace_font {
+                                            let font_id = if app.data.settings.editor.monospace_font
+                                            {
                                                 FontId::monospace(code_font_size)
                                             } else {
                                                 FontId::proportional(code_font_size)
@@ -543,7 +557,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                             ui.add(
                                                 egui::Label::new(
                                                     RichText::new(preview)
-                                                        .font(FontId::monospace(12.0))
+                                                        .font(FontId::monospace(11.5))
                                                         .color(Color32::from_rgb(230, 235, 245)),
                                                 )
                                                 .wrap(),
@@ -552,17 +566,17 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                     });
                                 });
 
-                            ui.add_space(12.0);
+                            ui.add_space(8.0);
 
-                            // 6. Action Buttons Bar (Responsive wrapped layout)
+                            // 6. Action Buttons Bar (Compact layout)
                             ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                                ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
 
                                 let accept_btn = button::animated_primary_button(
                                     ui,
                                     "Accept (Tab)",
                                     &palette,
-                                    egui::vec2(110.0, 32.0),
+                                    egui::vec2(96.0, 28.0),
                                 );
                                 if accept_btn.clicked() {
                                     accept_triggered = true;
@@ -572,7 +586,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                     ui,
                                     "Copy",
                                     &palette,
-                                    egui::vec2(70.0, 32.0),
+                                    egui::vec2(60.0, 28.0),
                                 );
                                 if copy_btn.clicked() {
                                     ui.ctx().copy_text(preview.clone());
@@ -582,7 +596,7 @@ pub fn render_ai_copilot_modal(app: &mut QuickyNotesApp, ctx: &egui::Context) {
                                 let discard_btn = button::animated_danger_button(
                                     ui,
                                     "Discard (Esc)",
-                                    egui::vec2(100.0, 32.0),
+                                    egui::vec2(90.0, 28.0),
                                 );
                                 if discard_btn.clicked() {
                                     discard_triggered = true;
@@ -658,13 +672,13 @@ fn apply_ai_replacement(app: &mut QuickyNotesApp, replacement: &str) {
 
 /// Renders a quick action preset tile button with clean typography and hover animation.
 fn render_action_tile(ui: &mut Ui, label: &str, palette: &Palette) -> egui::Response {
-    let font = FontId::proportional(12.0);
+    let font = FontId::proportional(11.0);
     let label_galley = ui
         .painter()
         .layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE);
 
-    let total_width = label_galley.size().x + 22.0;
-    let height = 28.0;
+    let total_width = label_galley.size().x + 16.0;
+    let height = 24.0;
 
     let (rect, response) = ui.allocate_exact_size(egui::vec2(total_width, height), Sense::click());
     let is_hovered = response.hovered();
@@ -682,10 +696,10 @@ fn render_action_tile(ui: &mut Ui, label: &str, palette: &Palette) -> egui::Resp
         hov_anim,
     );
 
-    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    ui.painter().rect_filled(rect, CornerRadius::same(5), bg);
     ui.painter().rect_stroke(
         rect,
-        CornerRadius::same(6),
+        CornerRadius::same(5),
         Stroke::new(1.0 + 0.5 * hov_anim, border_color),
         egui::StrokeKind::Outside,
     );

@@ -254,8 +254,13 @@ pub fn render_folder_sidebar(
     palette: &Palette,
     ui: &mut Ui,
     height: f32,
+    ui_font_size: f32,
 ) -> Option<FolderTreeAction> {
     let mut triggered_action = None;
+
+    let header_font_size = (ui_font_size + 0.5).clamp(11.0, 26.0);
+    let btn_font_size = ui_font_size.clamp(10.0, 24.0);
+    let filter_font_size = (ui_font_size - 0.5).clamp(10.0, 22.0);
 
     egui::Frame::NONE
         .fill(Color32::from_rgba_unmultiplied(
@@ -279,12 +284,12 @@ pub fn render_folder_sidebar(
                     ui.spacing_mut().item_spacing.x = 4.0;
                     ui.label(
                         RichText::new("📂")
-                            .font(FontId::proportional(13.0))
+                            .font(FontId::proportional(header_font_size + 1.0))
                             .color(Color32::from_rgb(245, 158, 11)),
                     );
                     ui.label(
                         RichText::new(&workspace.root_name)
-                            .font(FontId::proportional(12.5))
+                            .font(FontId::proportional(header_font_size))
                             .strong()
                             .color(Color32::WHITE),
                     );
@@ -292,8 +297,10 @@ pub fn render_folder_sidebar(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Close Folder button
                         let btn_close = ui.add(
-                            egui::Button::new(RichText::new("×").font(FontId::proportional(13.0)))
-                                .frame(false),
+                            egui::Button::new(
+                                RichText::new("×").font(FontId::proportional(btn_font_size + 2.0)),
+                            )
+                            .frame(false),
                         );
                         if btn_close.on_hover_text("Close folder workspace").clicked() {
                             triggered_action = Some(FolderTreeAction::CloseWorkspace);
@@ -301,8 +308,10 @@ pub fn render_folder_sidebar(
 
                         // Collapse All button
                         let btn_collapse = ui.add(
-                            egui::Button::new(RichText::new("⇲").font(FontId::proportional(11.0)))
-                                .frame(false),
+                            egui::Button::new(
+                                RichText::new("⇲").font(FontId::proportional(btn_font_size)),
+                            )
+                            .frame(false),
                         );
                         if btn_collapse.on_hover_text("Collapse all folders").clicked() {
                             workspace.collapse_all();
@@ -310,8 +319,10 @@ pub fn render_folder_sidebar(
 
                         // Refresh button
                         let btn_refresh = ui.add(
-                            egui::Button::new(RichText::new("🔄").font(FontId::proportional(11.0)))
-                                .frame(false),
+                            egui::Button::new(
+                                RichText::new("🔄").font(FontId::proportional(btn_font_size)),
+                            )
+                            .frame(false),
                         );
                         if btn_refresh.on_hover_text("Refresh folder tree").clicked() {
                             workspace.refresh();
@@ -325,13 +336,13 @@ pub fn render_folder_sidebar(
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new("🔍")
-                            .font(FontId::proportional(10.0))
+                            .font(FontId::proportional(filter_font_size - 1.0))
                             .color(Color32::from_gray(140)),
                     );
                     ui.add(
                         egui::TextEdit::singleline(&mut workspace.search_filter)
                             .hint_text("Filter files...")
-                            .font(FontId::proportional(11.0))
+                            .font(FontId::proportional(filter_font_size))
                             .desired_width(ui.available_width()),
                     );
                 });
@@ -360,6 +371,7 @@ pub fn render_folder_sidebar(
                             0,
                             palette,
                             ui,
+                            ui_font_size,
                             &mut toggled_path,
                             &mut opened_file,
                         );
@@ -387,10 +399,19 @@ fn render_node_children(
     depth: usize,
     palette: &Palette,
     ui: &mut Ui,
+    ui_font_size: f32,
     toggled_path: &mut Option<PathBuf>,
     opened_file: &mut Option<PathBuf>,
 ) {
-    let indent = (depth as f32) * 14.0;
+    let item_font_size = ui_font_size.clamp(11.0, 24.0);
+    let icon_font_size = (ui_font_size + 1.0).clamp(12.0, 26.0);
+    let arrow_font_size = (ui_font_size - 0.5).clamp(10.0, 22.0);
+    let item_height = (ui_font_size * 1.85).clamp(24.0, 52.0);
+    let indent_step = (ui_font_size * 1.15).clamp(14.0, 32.0);
+    let icon_offset = (ui_font_size * 1.0).clamp(12.0, 28.0);
+    let text_offset = (ui_font_size * 2.35).clamp(28.0, 60.0);
+
+    let indent = (depth as f32) * indent_step;
 
     for node in nodes {
         if !node.matches_filter(filter_query) {
@@ -403,7 +424,6 @@ fn render_node_children(
         let node_path_str = node.path.to_string_lossy();
         let is_active = !is_dir && active_file_path == Some(&*node_path_str);
 
-        let item_height = 22.0;
         let row_size = egui::vec2(ui.available_width(), item_height);
         let (row_rect, row_resp) = ui.allocate_exact_size(row_size, egui::Sense::click());
 
@@ -431,7 +451,7 @@ fn render_node_children(
         // Draw guideline ticks for depth > 0
         if depth > 0 {
             for d in 0..depth {
-                let guide_x = row_rect.min.x + (d as f32 * 14.0) + 7.0;
+                let guide_x = row_rect.min.x + (d as f32 * indent_step) + (indent_step * 0.5);
                 ui.painter().line_segment(
                     [
                         egui::pos2(guide_x, row_rect.min.y),
@@ -460,15 +480,15 @@ fn render_node_children(
                 egui::pos2(x_start, y_center),
                 egui::Align2::LEFT_CENTER,
                 arrow,
-                FontId::proportional(11.0),
+                FontId::proportional(arrow_font_size),
                 arrow_color,
             );
 
             ui.painter().text(
-                egui::pos2(x_start + 12.0, y_center),
+                egui::pos2(x_start + icon_offset, y_center),
                 egui::Align2::LEFT_CENTER,
                 folder_icon,
-                FontId::proportional(12.0),
+                FontId::proportional(icon_font_size),
                 Color32::from_rgb(245, 158, 11),
             );
 
@@ -481,10 +501,10 @@ fn render_node_children(
             };
 
             ui.painter().text(
-                egui::pos2(x_start + 28.0, y_center),
+                egui::pos2(x_start + text_offset, y_center),
                 egui::Align2::LEFT_CENTER,
                 &node.name,
-                FontId::proportional(11.5),
+                FontId::proportional(item_font_size),
                 name_color,
             );
         } else {
@@ -497,10 +517,10 @@ fn render_node_children(
             };
 
             ui.painter().text(
-                egui::pos2(x_start + 12.0, y_center),
+                egui::pos2(x_start + icon_offset, y_center),
                 egui::Align2::LEFT_CENTER,
                 icon,
-                FontId::proportional(11.5),
+                FontId::proportional(icon_font_size),
                 final_icon_color,
             );
 
@@ -513,10 +533,10 @@ fn render_node_children(
             };
 
             ui.painter().text(
-                egui::pos2(x_start + 28.0, y_center),
+                egui::pos2(x_start + text_offset, y_center),
                 egui::Align2::LEFT_CENTER,
                 &node.name,
-                FontId::proportional(11.5),
+                FontId::proportional(item_font_size),
                 name_color,
             );
         }
@@ -589,6 +609,7 @@ fn render_node_children(
                 depth + 1,
                 palette,
                 ui,
+                ui_font_size,
                 toggled_path,
                 opened_file,
             );

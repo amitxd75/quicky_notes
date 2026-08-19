@@ -175,6 +175,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
     let suggestion_engine = &mut app.suggestion_engine;
     let active_ghost_suffix = &mut app.active_ghost_suffix;
     let last_cursor_range = &mut app.last_cursor_range;
+    let last_selected_range = &mut app.last_selected_range;
     let folder_workspace = &mut app.folder_workspace;
     let notes = &mut app.data.notes;
     let split_ratio = &mut app.split_ratio;
@@ -216,6 +217,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                             &palette,
                             ui,
                             full_height,
+                            app.data.settings.appearance.ui_font_size,
                         );
                     }
                 },
@@ -296,6 +298,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                         active_ghost_suffix,
                                         suggestion_engine,
                                         last_cursor_range,
+                                        last_selected_range,
                                         &palette,
                                         &line_font,
                                         &code_theme,
@@ -386,6 +389,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                                                     active_ghost_suffix,
                                                     suggestion_engine,
                                                     last_cursor_range,
+                                                    last_selected_range,
                                                     &palette,
                                                     &line_font,
                                                     &code_theme,
@@ -488,49 +492,6 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
                         note.is_dirty = true;
                         note.has_disk_conflict = false;
                         app.is_dirty = true;
-
-                        if app.data.settings.general.auto_title_from_first_line
-                            && note.file_path.is_none()
-                        {
-                            let prefix =
-                                app.data.settings.general.default_title_prefix.to_lowercase();
-                            let is_default_title = note.title.to_lowercase().starts_with(&prefix)
-                                || note.title.starts_with("untitled");
-
-                            if is_default_title
-                                && let Some(first_line) =
-                                    note.content.lines().find(|l| !l.trim().is_empty())
-                            {
-                                let clean_line = first_line.trim().trim_start_matches('#').trim();
-                                let alphabetic_count =
-                                    clean_line.chars().filter(|c| c.is_alphabetic()).count();
-
-                                // Require at least 3 alphabetic characters to avoid renaming to "1.md" on typing numbers or lists
-                                if alphabetic_count >= 3 && clean_line.len() >= 3 {
-                                    let ext = if note.is_markdown() {
-                                        ".md"
-                                    } else {
-                                        &app.data.settings.editor.default_extension
-                                    };
-                                    let max_title_chars = app
-                                        .data
-                                        .settings
-                                        .advanced
-                                        .max_note_title_len
-                                        .saturating_sub(6)
-                                        .max(12);
-                                    let mut truncated: String =
-                                        clean_line.chars().take(max_title_chars).collect();
-                                    if !truncated.ends_with(ext) {
-                                        truncated.push_str(ext);
-                                    }
-                                    note.title = crate::models::Note::sanitize_title_with_len(
-                                        &truncated,
-                                        app.data.settings.advanced.max_note_title_len,
-                                    );
-                                }
-                            }
-                        }
                     }
 
                     // Render bottom plugin output console panel if active
@@ -621,13 +582,18 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
 
     // Execute actions triggered from the right-click context menu
     if let Some(action) = context_menu_action {
-        let cursor_range = app.last_cursor_range;
+        let cursor_range = match (app.last_cursor_range, app.last_selected_range) {
+            (Some((s, e)), _) if s < e => Some((s, e)),
+            (_, Some((s, e))) if s < e => Some((s, e)),
+            _ => app.last_cursor_range,
+        };
         match action {
             crate::ui::context_menu::ContextMenuAction::LaunchAi => {
                 if let Some((start, end)) = cursor_range
                     && start < end
                 {
                     app.last_cursor_range = Some((start, end));
+                    app.last_selected_range = Some((start, end));
                 }
                 app.trigger_ai_assist();
             }
@@ -744,8 +710,18 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
     };
 
     let total_w = ui.available_width();
-    let is_compact = total_w < STATUS_BAR_COMPACT_BREAKPOINT;
-    let is_ultra_compact = total_w < STATUS_BAR_ULTRA_COMPACT_BREAKPOINT;
+    let ui_size = app.data.settings.appearance.ui_font_size;
+    let (words, chars, lines) = app.cached_active_stats;
+
+    // Estimate right side width budget to prevent left/right layout collision during resize transitions
+    let right_width_budget = if total_w < 500.0 {
+        130.0
+    } else if total_w < 720.0 {
+        220.0
+    } else {
+        320.0
+    };
+    let left_width_avail = (total_w - right_width_budget - 24.0).max(60.0);
 
     egui::Frame::NONE
         .inner_margin(Margin::symmetric(14, 2))
@@ -756,233 +732,210 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
 
-                // ─── 1. Left-Side Unboxed Items ───
-
-                // Save / Sync Status Indicator
-                let (dot_color, save_label, label_color) = if app.is_dirty {
-                    (
-                        Color32::from_rgb(251, 191, 36),
-                        "Unsaved",
-                        Color32::from_rgb(251, 191, 36),
-                    )
-                } else {
-                    (
-                        Color32::from_rgb(52, 211, 153),
-                        "Saved",
-                        Color32::from_gray(210),
-                    )
-                };
-                let save_btn = button::status_bar_item(
-                    ui,
-                    Some(("●", dot_color)),
-                    save_label,
-                    label_color,
-                    false,
-                );
-                let save_tooltip = if app.is_dirty {
-                    "● Unsaved changes in note\n• Click to save immediately to disk (Ctrl+S)"
-                } else {
-                    "● All notes saved to disk ✓\n• Click to force save (Ctrl+S)"
-                };
-                if save_btn.on_hover_text(save_tooltip).clicked() {
-                    app.save_notes_to_disk();
-                }
-
-                // Font Family Mono / Sans
-                let font_label = if app.data.settings.editor.monospace_font {
-                    "Mono"
-                } else {
-                    "Sans"
-                };
-                let font_btn = button::status_bar_item(
-                    ui,
-                    None,
-                    font_label,
-                    Color32::from_gray(210),
-                    app.data.settings.editor.monospace_font,
-                );
-                let font_tooltip = format!(
-                    "Font Family: {}\n• Click to toggle between Monospace and Proportional font",
-                    if app.data.settings.editor.monospace_font {
-                        "Monospace"
+                    // Save / Sync Status Indicator
+                    let (dot_color, save_label, label_color) = if app.is_dirty {
+                        (
+                            Color32::from_rgb(251, 191, 36),
+                            "Unsaved",
+                            Color32::from_rgb(251, 191, 36),
+                        )
                     } else {
-                        "Proportional"
+                        (
+                            Color32::from_rgb(52, 211, 153),
+                            "Saved",
+                            Color32::from_gray(210),
+                        )
+                    };
+                    let save_btn = button::status_bar_item(
+                        ui,
+                        Some(("●", dot_color)),
+                        save_label,
+                        label_color,
+                        false,
+                    );
+                    let save_tooltip = if app.is_dirty {
+                        "● Unsaved changes in note\n• Click to save immediately to disk (Ctrl+S)"
+                    } else {
+                        "● All notes saved to disk ✓\n• Click to force save (Ctrl+S)"
+                    };
+                    if save_btn.on_hover_text(save_tooltip).clicked() {
+                        app.save_notes_to_disk();
                     }
-                );
-                if font_btn.on_hover_text(font_tooltip).clicked() {
-                    app.data.settings.editor.monospace_font =
-                        !app.data.settings.editor.monospace_font;
-                    app.is_dirty = true;
-                    app.set_status(format!(
-                        "Font: {}",
+
+                    // Font Family Mono / Sans
+                    let font_label = if app.data.settings.editor.monospace_font {
+                        "Mono"
+                    } else {
+                        "Sans"
+                    };
+                    let font_btn = button::status_bar_item(
+                        ui,
+                        None,
+                        font_label,
+                        Color32::from_gray(210),
+                        app.data.settings.editor.monospace_font,
+                    );
+                    let font_tooltip = format!(
+                        "Font Family: {}\n• Click to toggle between Monospace and Proportional font",
                         if app.data.settings.editor.monospace_font {
                             "Monospace"
                         } else {
                             "Proportional"
                         }
-                    ));
-                }
-
-                ui.label(
-                    RichText::new("•")
-                        .font(FontId::proportional(10.0))
-                        .color(Color32::from_gray(100)),
-                );
-
-                // Document / File Link Indicator
-                let status_duration = app.data.settings.advanced.status_msg_duration_secs;
-                if let Some(ref path_str) = active_file_path {
-                    let is_status_active = app.status_msg.as_ref().is_some_and(|(_, created)| {
-                        created.elapsed().as_secs_f32() < status_duration
-                    });
-                    let max_path_len = if is_status_active {
-                        14
-                    } else if is_compact {
-                        18
-                    } else {
-                        32
-                    };
-                    let display_path = crate::storage::format_display_path(path_str, max_path_len);
-                    let path_btn = button::status_bar_item(
-                        ui,
-                        Some(("🔗", palette.accent)),
-                        &display_path,
-                        palette.accent,
-                        false,
                     );
-                    let tooltip = format!(
-                        "📁 Directly linked file on disk:\n{}\n\n• Click to copy full path\n• Right-click to reveal in file manager",
-                        path_str
-                    );
-                    let path_btn = path_btn.on_hover_text(tooltip);
-                    if path_btn.clicked() {
-                        ui.ctx().copy_text(path_str.clone());
-                        app.show_toast(
-                            "File path copied to clipboard",
-                            crate::ui::toast::ToastKind::Success,
-                        );
-                    }
-                    path_btn.context_menu(|ui| {
-                        if ui.button("📋 Copy Full Path").clicked() {
-                            ui.ctx().copy_text(path_str.clone());
-                            ui.close();
-                        }
-                        if ui.button("📂 Reveal Folder in File Manager").clicked() {
-                            if let Some(parent) = std::path::Path::new(path_str).parent() {
-                                crate::ui::drag_drop::safe_open_folder(parent);
+                    if font_btn.on_hover_text(font_tooltip).clicked() {
+                        app.data.settings.editor.monospace_font =
+                            !app.data.settings.editor.monospace_font;
+                        app.is_dirty = true;
+                        app.set_status(format!(
+                            "Font: {}",
+                            if app.data.settings.editor.monospace_font {
+                                "Monospace"
+                            } else {
+                                "Proportional"
                             }
-                            ui.close();
-                        }
-                    });
-                } else {
-                    let mode_label = if is_markdown {
-                        "Markdown"
-                    } else {
-                        "Plain Text"
-                    };
-                    let mode_btn = button::status_bar_item(
-                        ui,
-                        None,
-                        mode_label,
-                        Color32::from_gray(190),
-                        false,
-                    );
-                    if is_markdown {
-                        let mode_tooltip = format!(
-                            "Document Type: Markdown ({})\n• Click to cycle preview mode (Edit / Split / View)",
-                            app.preview_mode.label()
-                        );
-                        if mode_btn.on_hover_text(mode_tooltip).clicked() {
-                            app.preview_mode = app.preview_mode.next();
-                        }
-                    } else {
-                        mode_btn.on_hover_text("Document Type: Plain Text Note");
+                        ));
                     }
-                }
 
-                // Attached Images Popup Button
-                if let Some(note) = app.active_note_mut()
-                    && !note.attachments.is_empty()
-                {
                     ui.label(
                         RichText::new("•")
                             .font(FontId::proportional(10.0))
                             .color(Color32::from_gray(100)),
                     );
-                    crate::ui::image_view::render_attachment_popup_button(
-                        ui,
-                        ctx,
-                        note,
-                        &palette,
-                        &mut attachment_changed,
-                    );
-                }
 
-                // Transient Status Message Notification
-                if let Some((msg, created)) = &app.status_msg {
-                    let elapsed = created.elapsed().as_secs_f32();
-                    if elapsed < status_duration {
-                        let fade = if elapsed < 0.2 {
-                            (elapsed / 0.2).clamp(0.0, 1.0)
-                        } else if elapsed > status_duration - 0.7 {
-                            ((status_duration - elapsed) / 0.7).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
-                        let alpha = (255.0 * fade) as u8;
-                        if alpha > 10 {
-                            ui.label(
-                                RichText::new("•")
-                                    .font(FontId::proportional(10.0))
-                                    .color(Color32::from_gray(100)),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(format!("⚡ {}", msg))
-                                        .font(FontId::proportional(11.5))
-                                        .color(Color32::from_rgba_unmultiplied(
-                                            palette.accent.r(),
-                                            palette.accent.g(),
-                                            palette.accent.b(),
-                                            alpha,
-                                        )),
-                                )
-                                .truncate(),
+                    // Document / File Link Indicator
+                    let status_duration = app.data.settings.advanced.status_msg_duration_secs;
+                    if let Some(ref path_str) = active_file_path {
+                        let max_path_len = ((left_width_avail * 0.12) as usize).clamp(12, 38);
+                        let display_path = crate::storage::format_display_path(path_str, max_path_len);
+                        let path_btn = button::status_bar_item(
+                            ui,
+                            Some(("🔗", palette.accent)),
+                            &display_path,
+                            palette.accent,
+                            false,
+                        );
+                        let tooltip = format!(
+                            "📁 Directly linked file on disk:\n{}\n\n• Click to copy full path\n• Right-click to reveal in file manager",
+                            path_str
+                        );
+                        let path_btn = path_btn.on_hover_text(tooltip);
+                        if path_btn.clicked() {
+                            ui.ctx().copy_text(path_str.clone());
+                            app.show_toast(
+                                "File path copied to clipboard",
+                                crate::ui::toast::ToastKind::Success,
                             );
                         }
+                        path_btn.context_menu(|ui| {
+                            if ui.button("📋 Copy Full Path").clicked() {
+                                ui.ctx().copy_text(path_str.clone());
+                                ui.close();
+                            }
+                            if ui.button("📂 Reveal Folder in File Manager").clicked() {
+                                if let Some(parent) = std::path::Path::new(path_str).parent() {
+                                    crate::ui::drag_drop::safe_open_folder(parent);
+                                }
+                                ui.close();
+                            }
+                        });
+                    } else {
+                        let mode_label = if is_markdown {
+                            "Markdown"
+                        } else {
+                            "Plain Text"
+                        };
+                        let mode_btn = button::status_bar_item(
+                            ui,
+                            None,
+                            mode_label,
+                            Color32::from_gray(190),
+                            false,
+                        );
+                        if is_markdown {
+                            let mode_tooltip = format!(
+                                "Document Type: Markdown ({})\n• Click to cycle preview mode (Edit / Split / View)",
+                                app.preview_mode.label()
+                            );
+                            if mode_btn.on_hover_text(mode_tooltip).clicked() {
+                                app.preview_mode = app.preview_mode.next();
+                            }
+                        } else {
+                            mode_btn.on_hover_text("Document Type: Plain Text Note");
+                        }
                     }
-                }
 
-                // ─── 2. Right-Anchored Items (Layout right_to_left - Never overflows!) ───
+                    // Attached Images Popup Button
+                    if let Some(note) = app.active_note_mut()
+                        && !note.attachments.is_empty()
+                    {
+                        ui.label(
+                            RichText::new("•")
+                                .font(FontId::proportional(10.0))
+                                .color(Color32::from_gray(100)),
+                        );
+                        crate::ui::image_view::render_attachment_popup_button(
+                            ui,
+                            ctx,
+                            note,
+                            &palette,
+                            &mut attachment_changed,
+                        );
+                    }
+
+                    // Transient Status Message Notification
+                    if let Some((msg, created)) = &app.status_msg {
+                        let elapsed = created.elapsed().as_secs_f32();
+                        if elapsed < status_duration {
+                            let fade = if elapsed < 0.2 {
+                                (elapsed / 0.2).clamp(0.0, 1.0)
+                            } else if elapsed > status_duration - 0.7 {
+                                ((status_duration - elapsed) / 0.7).clamp(0.0, 1.0)
+                            } else {
+                                1.0
+                            };
+                            let alpha = (255.0 * fade) as u8;
+                            if alpha > 10 {
+                                ui.label(
+                                    RichText::new("•")
+                                        .font(FontId::proportional(10.0))
+                                        .color(Color32::from_gray(100)),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("⚡ {}", msg))
+                                            .font(FontId::proportional((ui_size * 0.85).clamp(10.0, 14.0)))
+                                            .color(Color32::from_rgba_unmultiplied(
+                                                palette.accent.r(),
+                                                palette.accent.g(),
+                                                palette.accent.b(),
+                                                alpha,
+                                            )),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                        }
+                    }
+
+                // ─── 2. Right-Anchored Items (Smoothly right-aligned with fixed vertical alignment) ───
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
-                    // Document Metrics
-                    let (words, chars, lines) = app.cached_active_stats;
-                    let stats_text = if is_ultra_compact {
-                        format!("L: {} • W: {}", lines, words)
-                    } else if is_compact {
-                        format!("L: {} • W: {} • C: {}", lines, words, chars)
-                    } else {
-                        format!("Lines: {} • Words: {} • Chars: {}", lines, words, chars)
-                    };
-                    let stats_btn = button::status_bar_item(
-                        ui,
-                        None,
-                        &stats_text,
-                        Color32::from_gray(190),
-                        false,
-                    );
-                    let stats_tooltip = format!(
-                        "📊 Document Metrics:\n• Lines: {}\n• Words: {}\n• Characters: {}\n• Click to focus editor",
-                        lines, words, chars
-                    );
-                    if stats_btn.on_hover_text(stats_tooltip).clicked() {
-                        app.focus_editor = true;
+                    // UTF-8 Indicator (shown whenever there is room)
+                    if total_w >= 480.0 {
+                        let utf8_btn = button::status_bar_item(
+                            ui,
+                            None,
+                            "UTF-8",
+                            Color32::from_gray(150),
+                            true,
+                        );
+                        utf8_btn.on_hover_text("Text Encoding: UTF-8 Unicode");
                     }
 
                     // Interactive Tab Size
-                    if !is_compact {
+                    if total_w >= 560.0 {
                         let tab_text = format!("Tab: {} sp", app.data.settings.editor.tab_size);
                         let tab_btn = button::status_bar_item(
                             ui,
@@ -1023,16 +976,27 @@ fn render_status_bar(app: &mut QuickyNotesApp, ctx: &egui::Context, ui: &mut Ui)
                         });
                     }
 
-                    // UTF-8 Indicator
-                    if !is_ultra_compact {
-                        let utf8_btn = button::status_bar_item(
-                            ui,
-                            None,
-                            "UTF-8",
-                            Color32::from_gray(150),
-                            true,
-                        );
-                        utf8_btn.on_hover_text("Text Encoding: UTF-8 Unicode");
+                    // Document Metrics (Smooth and stable without jarring text jump)
+                    let stats_text = if total_w >= 660.0 {
+                        format!("Lines: {} • Words: {} • Chars: {}", lines, words, chars)
+                    } else if total_w >= 420.0 {
+                        format!("Lines: {} • Words: {}", lines, words)
+                    } else {
+                        format!("L: {} • W: {}", lines, words)
+                    };
+                    let stats_btn = button::status_bar_item(
+                        ui,
+                        None,
+                        &stats_text,
+                        Color32::from_gray(190),
+                        false,
+                    );
+                    let stats_tooltip = format!(
+                        "📊 Document Metrics:\n• Lines: {}\n• Words: {}\n• Characters: {}\n• Click to focus editor",
+                        lines, words, chars
+                    );
+                    if stats_btn.on_hover_text(stats_tooltip).clicked() {
+                        app.focus_editor = true;
                     }
                 });
             });
@@ -1221,6 +1185,7 @@ fn render_multiline_editor_pane(
     active_ghost_suffix: &mut Option<String>,
     suggestion_engine: &mut crate::suggest::SuggestionEngine,
     last_cursor_range: &mut Option<(usize, usize)>,
+    last_selected_range: &mut Option<(usize, usize)>,
     palette: &theme::Palette,
     line_font: &FontId,
     code_theme: &egui_extras::syntax_highlighting::CodeTheme,
@@ -1289,16 +1254,19 @@ fn render_multiline_editor_pane(
     let text_edit_id = ui.make_persistent_id("main_note_text_editor");
 
     // Zero-flicker selection locking on RMB / two-finger trackpad tap:
-    // If text was selected and the user right-clicks to open context menu,
+    // If text was selected and the user right-clicks/two-finger taps to open context menu,
     // pre-seed and lock the selection into TextEditState BEFORE TextEdit renders.
     let is_secondary_click = ui.input(|i| {
         i.pointer.secondary_clicked() || i.pointer.button_down(egui::PointerButton::Secondary)
     });
 
-    if is_secondary_click
-        && let Some((prev_s, prev_e)) = *last_cursor_range
-        && prev_s < prev_e
-    {
+    let active_selection = match (*last_cursor_range, *last_selected_range) {
+        (Some((s, e)), _) if s < e => Some((s, e)),
+        (_, Some((s, e))) if s < e => Some((s, e)),
+        _ => None,
+    };
+
+    if is_secondary_click && let Some((prev_s, prev_e)) = active_selection {
         let mut state =
             egui::text_edit::TextEditState::load(ui.ctx(), text_edit_id).unwrap_or_default();
         let c_start = egui::text::CCursor::new(prev_s);
@@ -1445,8 +1413,9 @@ fn render_multiline_editor_pane(
         if min_idx < max_idx {
             // User has an active, non-empty text selection
             *last_cursor_range = Some((min_idx, max_idx));
+            *last_selected_range = Some((min_idx, max_idx));
         } else if was_secondary_click
-            && let Some((prev_s, prev_e)) = *last_cursor_range
+            && let Some((prev_s, prev_e)) = *last_selected_range
             && prev_s < prev_e
         {
             // Secondary click occurred while text was selected: restore selection highlight and range!
@@ -1460,16 +1429,46 @@ fn render_multiline_editor_pane(
                     c_start, c_end,
                 )));
             state.store(ui.ctx(), output.response.id);
-        } else if !was_secondary_click {
+            *last_cursor_range = Some((prev_s, prev_e));
+        } else {
             *last_cursor_range = Some((min_idx, max_idx));
+            // Only clear last_selected_range on explicit primary click release (not during a secondary click or drag)
+            let primary_released =
+                ui.input(|i| i.pointer.primary_released() && !i.pointer.secondary_clicked());
+            if primary_released {
+                *last_selected_range = None;
+            }
         }
+    }
+
+    let menu_range = match (*last_cursor_range, *last_selected_range) {
+        (Some((s, e)), _) if s < e => Some((s, e)),
+        (_, Some((s, e))) if s < e => Some((s, e)),
+        _ => *last_cursor_range,
+    };
+
+    // When the editor loses focus (e.g. when right-click context menu opens), egui::TextEdit
+    // stops drawing the selection highlight by default. We explicitly paint the persistent selection highlight
+    // so the highlighted text stays 100% visible on screen without any visual loss or flicker!
+    if !resp.has_focus()
+        && let Some((start, end)) = menu_range
+        && start < end
+    {
+        paint_unfocused_selection_highlight(
+            ui,
+            &output.galley,
+            output.galley_pos,
+            start,
+            end,
+            palette,
+        );
     }
 
     resp.context_menu(|ui| {
         crate::ui::context_menu::render_editor_context_menu(
             ui,
             note,
-            *last_cursor_range,
+            menu_range,
             palette,
             plugin_items,
             context_menu_action,
@@ -1662,6 +1661,75 @@ fn handle_ghost_text(
     );
 
     false
+}
+
+/// Paints a persistent glowing text selection highlight when the editor is temporarily unfocused (e.g. while context menu is open).
+fn paint_unfocused_selection_highlight(
+    ui: &mut Ui,
+    galley: &egui::Galley,
+    galley_pos: egui::Pos2,
+    start: usize,
+    end: usize,
+    palette: &theme::Palette,
+) {
+    if start >= end || galley.rows.is_empty() {
+        return;
+    }
+
+    let fill_color = Palette::with_alpha(palette.accent, 85);
+    let stroke_color = Palette::with_alpha(palette.accent, 160);
+
+    let c_start = egui::text::CCursor::new(start);
+    let c_end = egui::text::CCursor::new(end);
+
+    let r_start = galley.pos_from_cursor(c_start);
+    let r_end = galley.pos_from_cursor(c_end);
+
+    // If start and end are on the same line/row
+    if (r_start.min.y - r_end.min.y).abs() < 2.0 {
+        let min_x = r_start.min.x.min(r_end.min.x);
+        let max_x = r_start.max.x.max(r_end.max.x).max(min_x + 4.0);
+        let min_y = r_start.min.y;
+        let max_y = r_start.max.y;
+
+        let screen_rect = egui::Rect::from_min_max(
+            galley_pos + egui::vec2(min_x, min_y),
+            galley_pos + egui::vec2(max_x, max_y),
+        );
+
+        ui.painter()
+            .rect_filled(screen_rect, egui::CornerRadius::same(2), fill_color);
+        ui.painter().rect_stroke(
+            screen_rect,
+            egui::CornerRadius::same(2),
+            egui::Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Inside,
+        );
+    } else {
+        // Multi-line selection: paint each character cell
+        let mut char_idx = start;
+        while char_idx < end {
+            let cur_cursor = egui::text::CCursor::new(char_idx);
+            let cur_r = galley.pos_from_cursor(cur_cursor);
+            let next_cursor = egui::text::CCursor::new(char_idx + 1);
+            let next_r = galley.pos_from_cursor(next_cursor);
+
+            let min_x = cur_r.min.x;
+            let max_x = next_r.max.x.max(min_x + 4.0);
+            let min_y = cur_r.min.y;
+            let max_y = cur_r.max.y;
+
+            let screen_rect = egui::Rect::from_min_max(
+                galley_pos + egui::vec2(min_x, min_y),
+                galley_pos + egui::vec2(max_x, max_y),
+            );
+
+            ui.painter()
+                .rect_filled(screen_rect, egui::CornerRadius::same(1), fill_color);
+
+            char_idx += 1;
+        }
+    }
 }
 
 /// Action emitted from the bottom plugin console drawer.
