@@ -205,7 +205,7 @@ fn render_editor_workspace(app: &mut QuickyNotesApp, _ctx: &egui::Context, ui: &
         Vec::new()
     };
 
-    let sidebar_width = if let Some(ws) = folder_workspace.as_ref() {
+    let sidebar_width = if show_sidebar && let Some(ws) = folder_workspace.as_ref() {
         ws.sidebar_width
     } else {
         0.0
