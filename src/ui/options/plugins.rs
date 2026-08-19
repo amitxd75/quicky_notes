@@ -95,13 +95,6 @@ pub fn render_plugins_manager_card(
                 ctx.request_repaint();
             }
         });
-
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new("✓ Sandboxed pure-Rust Rhai execution engine with zero C-FFI\n✓ Custom header icons, hotkeys, and context menu extensions\n✓ Safe terminal launchers & note buffer automation")
-                .font(FontId::proportional(11.5))
-                .color(Color32::from_gray(175)),
-        );
     });
 }
 
@@ -162,41 +155,55 @@ pub fn render_installed_plugins_list(
 
         for (idx, plugin) in app.plugin_manager.plugins.iter().enumerate() {
             if idx > 0 {
+                ui.add_space(4.0);
                 crate::ui::draw_horizontal_divider(ui);
-                ui.add_space(6.0);
+                ui.add_space(8.0);
             }
 
             let is_enabled = plugin.metadata.enabled;
 
             ui.vertical(|ui| {
-                // Top row: Name, Version, Author, and Toggle
+                // Top row: Name, Version, Author, and Toggle (Fluid responsive layout)
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(&plugin.metadata.name)
-                            .font(FontId::proportional(14.0))
-                            .strong()
-                            .color(if is_enabled {
-                                Color32::WHITE
-                            } else {
-                                Color32::from_gray(140)
-                            }),
-                    );
+                    ui.spacing_mut().item_spacing.x = 6.0;
 
-                    // Version badge
-                    crate::components::badge::custom_color_badge(
-                        ui,
-                        &format!("v{}", plugin.metadata.version),
-                        palette.accent,
-                    );
+                    let toggle_width = 44.0;
+                    let left_w = (ui.available_width() - toggle_width - 8.0).max(80.0);
 
-                    // Author badge
-                    if !plugin.metadata.author.is_empty() {
-                        crate::components::badge::shortcut_badge(
-                            ui,
-                            &format!("by {}", plugin.metadata.author),
-                            palette,
-                        );
-                    }
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_w, 24.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+
+                            ui.label(
+                                RichText::new(&plugin.metadata.name)
+                                    .font(FontId::proportional(13.5))
+                                    .strong()
+                                    .color(if is_enabled {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::from_gray(140)
+                                    }),
+                            );
+
+                            // Compact Version badge
+                            crate::components::badge::custom_color_badge(
+                                ui,
+                                &format!("v{}", plugin.metadata.version),
+                                palette.accent,
+                            );
+
+                            // Author tag
+                            if !plugin.metadata.author.is_empty() {
+                                ui.label(
+                                    RichText::new(format!("by {}", plugin.metadata.author))
+                                        .font(FontId::proportional(11.0))
+                                        .color(Color32::from_gray(140)),
+                                );
+                            }
+                        },
+                    );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut enabled_state = is_enabled;
@@ -213,54 +220,60 @@ pub fn render_installed_plugins_list(
                     ui.add_space(2.0);
                     ui.label(
                         RichText::new(&plugin.metadata.description)
-                            .font(FontId::proportional(12.0))
-                            .color(Color32::from_gray(175)),
+                            .font(FontId::proportional(11.5))
+                            .color(Color32::from_gray(165)),
                     );
                 }
 
-                // Capabilities badges (Header Buttons, Shortcuts, Context Menu)
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.spacing_mut().item_spacing.y = 4.0;
+                // Capabilities badges (Clean, icon-prefixed, compact)
+                let has_caps = !plugin.header_buttons.is_empty()
+                    || !plugin.shortcuts.is_empty()
+                    || !plugin.menu_items.is_empty()
+                    || plugin.metadata.file_path.is_some();
 
-                    for btn in &plugin.header_buttons {
-                        crate::components::badge::shortcut_badge(
-                            ui,
-                            &format!("Header: {} ({})", btn.icon, btn.id),
-                            palette,
-                        );
-                    }
+                if has_caps {
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
 
-                    for s in &plugin.shortcuts {
-                        crate::components::badge::shortcut_badge(
-                            ui,
-                            &format!("Shortcut: {}", s.key_combination),
-                            palette,
-                        );
-                    }
+                        for btn in &plugin.header_buttons {
+                            crate::components::badge::shortcut_badge(
+                                ui,
+                                &format!("📌 {}", btn.icon),
+                                palette,
+                            );
+                        }
 
-                    for m in &plugin.menu_items {
-                        crate::components::badge::shortcut_badge(
-                            ui,
-                            &format!("Context Menu: {}", m.label),
-                            palette,
-                        );
-                    }
+                        for s in &plugin.shortcuts {
+                            crate::components::badge::shortcut_badge(
+                                ui,
+                                &format!("⌨ {}", s.key_combination),
+                                palette,
+                            );
+                        }
 
-                    if let Some(ref fp) = plugin.metadata.file_path
-                        && let Some(fname) = std::path::Path::new(fp).file_name()
-                    {
-                        crate::components::badge::shortcut_badge(
-                            ui,
-                            &format!("File: {}", fname.to_string_lossy()),
-                            palette,
-                        );
-                    }
-                });
+                        for m in &plugin.menu_items {
+                            crate::components::badge::shortcut_badge(
+                                ui,
+                                &format!("📋 {}", m.label),
+                                palette,
+                            );
+                        }
+
+                        if let Some(ref fp) = plugin.metadata.file_path
+                            && let Some(fname) = std::path::Path::new(fp).file_name()
+                        {
+                            crate::components::badge::shortcut_badge(
+                                ui,
+                                &format!("📄 {}", fname.to_string_lossy()),
+                                palette,
+                            );
+                        }
+                    });
+                }
             });
 
-            ui.add_space(6.0);
+            ui.add_space(4.0);
         }
 
         // Apply toggled state
